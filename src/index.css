@@ -1,0 +1,7 @@
+﻿@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+}
+
+/* In v4, you don't need @apply for body anymore, just use the HTML classes */
