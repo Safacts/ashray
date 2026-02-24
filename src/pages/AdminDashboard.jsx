@@ -41,6 +41,30 @@ export default function AdminDashboard() {
   const [searchTerm, setSearchTerm] = useState('');
   const [expandedId, setExpandedId] = useState(null);
 
+  // --- NEW: Custom Modal States ---
+  const [modalConfig, setModalConfig] = useState({
+    isOpen: false,
+    type: 'confirm', // 'confirm' or 'prompt'
+    title: '',
+    message: '',
+    confirmText: 'Confirm',
+    isDestructive: false,
+    onConfirm: () => {},
+  });
+  const [promptValue, setPromptValue] = useState('');
+
+  // --- NEW: Modal Helper Functions ---
+  const closeModal = () => setModalConfig({ ...modalConfig, isOpen: false });
+
+  const showConfirmModal = (title, message, isDestructive, onConfirm) => {
+    setModalConfig({ isOpen: true, type: 'confirm', title, message, confirmText: isDestructive ? 'Delete' : 'Confirm', isDestructive, onConfirm });
+  };
+
+  const showPromptModal = (title, message, defaultValue, onConfirm) => {
+    setPromptValue(defaultValue);
+    setModalConfig({ isOpen: true, type: 'prompt', title, message, confirmText: 'Save', isDestructive: false, onConfirm });
+  };
+
   // 1. Authentication & Data Fetching
   const fetchDashboardData = async () => {
     setLoading(true);
@@ -109,34 +133,48 @@ export default function AdminDashboard() {
     fetchDashboardData();
   }, [navigate]);
 
-  // --- NEW: Analytics & Admin Controls ---
-  const handleUpdateFee = async () => {
-    const newFee = prompt("Enter new default monthly fee (₹):", currentFee);
-    if (!newFee || isNaN(newFee)) return;
-    
-    const hostelId = localStorage.getItem('admin_hostel_id');
-    const { error } = await supabase.from('hostels').update({ default_fee: parseInt(newFee) }).eq('id', hostelId);
-    
-    if (!error) {
-      setCurrentFee(parseInt(newFee));
-      toast.success('Default fee updated!');
-    } else {
-      toast.error('Failed to update fee');
-    }
+  // --- Analytics & Admin Controls ---
+  const handleUpdateFee = () => {
+    showPromptModal(
+      "Update Standard Fee",
+      "Enter new default monthly fee (₹):",
+      currentFee,
+      async (newFee) => {
+        const parsedFee = parseInt(newFee);
+        if (!parsedFee || isNaN(parsedFee)) return;
+        
+        const hostelId = localStorage.getItem('admin_hostel_id');
+        const { error } = await supabase.from('hostels').update({ default_fee: parsedFee }).eq('id', hostelId);
+        
+        if (!error) {
+          setCurrentFee(parsedFee);
+          toast.success('Default fee updated!');
+        } else {
+          toast.error('Failed to update fee');
+        }
+      }
+    );
   };
 
-  const handleUpdateStudentFee = async (e, studentId, currentVal) => {
+  const handleUpdateStudentFee = (e, studentId, currentVal) => {
     e.stopPropagation(); // Prevent the accordion from opening
-    const newFee = prompt("Enter CUSTOM fee for this student (₹):", currentVal || currentFee);
-    if (!newFee || isNaN(newFee)) return;
+    showPromptModal(
+      "Update Student Fee",
+      "Enter CUSTOM fee for this student (₹):",
+      currentVal || currentFee,
+      async (newFee) => {
+        const parsedFee = parseInt(newFee);
+        if (!parsedFee || isNaN(parsedFee)) return;
 
-    const { error } = await supabase.from('students').update({ monthly_fee: parseInt(newFee) }).eq('id', studentId);
-    if (!error) {
-      toast.success('Student fee updated');
-      fetchDashboardData();
-    } else {
-      toast.error('Failed to update');
-    }
+        const { error } = await supabase.from('students').update({ monthly_fee: parsedFee }).eq('id', studentId);
+        if (!error) {
+          toast.success('Student fee updated');
+          fetchDashboardData();
+        } else {
+          toast.error('Failed to update');
+        }
+      }
+    );
   };
 
   const handleUploadQR = async (e) => {
@@ -179,17 +217,23 @@ export default function AdminDashboard() {
     }
   };
 
-  const handleRejectPayment = async (paymentId) => {
-    if (!confirm('Are you sure you want to reject this payment?')) return;
-    const toastId = toast.loading('Rejecting payment...');
-    try {
-      const { error } = await supabase.from('payments').update({ status: 'rejected' }).eq('id', paymentId);
-      if (error) throw error;
-      toast.success('Payment Rejected', { id: toastId });
-      fetchDashboardData();
-    } catch (error) {
-      toast.error('Failed to reject payment', { id: toastId });
-    }
+  const handleRejectPayment = (paymentId) => {
+    showConfirmModal(
+      "Reject Payment",
+      "Are you sure you want to reject this payment?",
+      true, // isDestructive = true
+      async () => {
+        const toastId = toast.loading('Rejecting payment...');
+        try {
+          const { error } = await supabase.from('payments').update({ status: 'rejected' }).eq('id', paymentId);
+          if (error) throw error;
+          toast.success('Payment Rejected', { id: toastId });
+          fetchDashboardData();
+        } catch (error) {
+          toast.error('Failed to reject payment', { id: toastId });
+        }
+      }
+    );
   };
 
   // --- Utility Functions ---
@@ -198,13 +242,21 @@ export default function AdminDashboard() {
     navigate('/login');
   };
 
-  const handleDelete = async (id) => {
-    if (!confirm('Permanently delete this student?')) return;
-    const { error } = await supabase.from('students').delete().eq('id', id);
-    if (!error) {
-      setStudents(students.filter(s => s.id !== id));
-      toast.success('Student removed');
-    }
+  const handleDelete = (id) => {
+    showConfirmModal(
+      "Permanently Delete Student?",
+      "This action cannot be undone. All data associated with this student will be lost.",
+      true, // isDestructive = true
+      async () => {
+        const { error } = await supabase.from('students').delete().eq('id', id);
+        if (!error) {
+          setStudents(students.filter(s => s.id !== id));
+          toast.success('Student removed');
+        } else {
+          toast.error('Failed to delete student');
+        }
+      }
+    );
   };
 
   const toggleExpand = (id) => {
@@ -558,7 +610,7 @@ export default function AdminDashboard() {
           </>
         ) : (
           /* ========================================= */
-          /* PENDING PAYMENTS TAB                    */
+          /* PENDING PAYMENTS TAB                      */
           /* ========================================= */
           <div className="space-y-4">
             {pendingPayments.length === 0 ? (
@@ -620,6 +672,44 @@ export default function AdminDashboard() {
           </div>
         )}
       </div>
+
+      {/* --- NEW: Global Modal System UI --- */}
+      {modalConfig.isOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-gray-900/60 backdrop-blur-sm animate-in fade-in">
+          <div className="bg-white w-full max-w-sm rounded-3xl p-6 shadow-2xl animate-in zoom-in-95">
+            <h2 className="text-xl font-bold text-gray-900 mb-2">{modalConfig.title}</h2>
+            <p className="text-sm text-gray-600 mb-5 leading-relaxed">{modalConfig.message}</p>
+            
+            {modalConfig.type === 'prompt' && (
+              <input 
+                type="number" 
+                value={promptValue}
+                onChange={(e) => setPromptValue(e.target.value)}
+                className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 mb-6 font-bold text-lg text-gray-900 focus:ring-2 focus:ring-indigo-500 outline-none"
+                autoFocus
+              />
+            )}
+
+            <div className="flex gap-3">
+              <button 
+                onClick={closeModal} 
+                className="flex-1 bg-gray-100 text-gray-700 py-3 rounded-xl font-bold hover:bg-gray-200 transition"
+              >
+                Cancel
+              </button>
+              <button 
+                onClick={() => {
+                  modalConfig.onConfirm(modalConfig.type === 'prompt' ? promptValue : undefined);
+                  closeModal();
+                }} 
+                className={`flex-1 text-white py-3 rounded-xl font-bold transition flex justify-center items-center shadow-md ${modalConfig.isDestructive ? 'bg-red-600 hover:bg-red-700' : 'bg-indigo-600 hover:bg-indigo-700'}`}
+              >
+                {modalConfig.confirmText}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
