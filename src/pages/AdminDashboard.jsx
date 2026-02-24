@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabaseClient';
-import { Trash2, Search, Loader2, User, Phone, FileText, MessageCircle, ChevronDown, ChevronUp, Calendar, PhoneCall, FileDown, Image as ImageIcon, LogOut, CheckCircle, XCircle, Eye, IndianRupee, Edit2, TrendingUp, Users, Wallet, Upload, QrCode } from 'lucide-react';
+import { Trash2, Search, Loader2, User, Phone, FileText, MessageCircle, ChevronDown, ChevronUp, Calendar, PhoneCall, FileDown, Image as ImageIcon, LogOut, CheckCircle, XCircle, Eye, IndianRupee, Edit2, TrendingUp, Users, Wallet, Upload, QrCode, Filter, ArrowLeft, PlusCircle, Receipt, TrendingDown, BarChart3 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { jsPDF } from 'jspdf';
 import { useNavigate } from 'react-router-dom';
@@ -34,14 +34,23 @@ export default function AdminDashboard() {
   const [hostelName, setHostelName] = useState('');
   const [currentFee, setCurrentFee] = useState(3000); // Default fee state
   const [qrCodeUrl, setQrCodeUrl] = useState(null);
+  
+  // --- NEW: Detailed Analytics & Expense States ---
+  const [expenses, setExpenses] = useState([]);
+  const [successfulPayments, setSuccessfulPayments] = useState([]);
   const [stats, setStats] = useState({ totalRevenue: 0, collectedThisMonth: 0 });
+  const [detailedStats, setDetailedStats] = useState({ currentIncome: 0, lastIncome: 0, currentExpense: 0, lastExpense: 0 });
   
   // UI States
   const [activeTab, setActiveTab] = useState('analytics'); // Default to the new dashboard view
   const [searchTerm, setSearchTerm] = useState('');
   const [expandedId, setExpandedId] = useState(null);
 
-  // --- NEW: Custom Modal States ---
+  // --- NEW: Filter States ---
+  const [filterRoom, setFilterRoom] = useState('all');
+  const [filterStatus, setFilterStatus] = useState('all');
+
+  // Custom Modal States
   const [modalConfig, setModalConfig] = useState({
     isOpen: false,
     type: 'confirm', // 'confirm' or 'prompt'
@@ -52,8 +61,12 @@ export default function AdminDashboard() {
     onConfirm: () => {},
   });
   const [promptValue, setPromptValue] = useState('');
+  
+  // --- NEW: Expense Modal State ---
+  const [expenseModalOpen, setExpenseModalOpen] = useState(false);
+  const [expenseData, setExpenseData] = useState({ amount: '', description: '', date: new Date().toISOString().split('T')[0] });
 
-  // --- NEW: Modal Helper Functions ---
+  // Modal Helper Functions
   const closeModal = () => setModalConfig({ ...modalConfig, isOpen: false });
 
   const showConfirmModal = (title, message, isDestructive, onConfirm) => {
@@ -106,21 +119,41 @@ export default function AdminDashboard() {
       if (payError) throw payError;
       setPendingPayments(payData);
 
+      // --- NEW: Fetch Expenses ---
+      const { data: expData } = await supabase
+        .from('expenses')
+        .select('*')
+        .eq('hostel_id', hostelId)
+        .order('expense_date', { ascending: false });
+      setExpenses(expData || []);
+
       // Calculate Financials
       const { data: revenueData } = await supabase
         .from('payments')
-        .select('amount, created_at, students!inner(hostel_id)')
+        .select('amount, created_at, students!inner(hostel_id, full_name, room_number)')
         .eq('status', 'success')
-        .eq('students.hostel_id', hostelId);
+        .eq('students.hostel_id', hostelId)
+        .order('created_at', { ascending: false });
 
-      if (revenueData) {
-        const total = revenueData.reduce((sum, txn) => sum + (txn.amount || 0), 0);
-        const currentMonth = new Date().getMonth();
-        const monthly = revenueData
-          .filter(txn => new Date(txn.created_at).getMonth() === currentMonth)
-          .reduce((sum, txn) => sum + (txn.amount || 0), 0);
-        setStats({ totalRevenue: total, collectedThisMonth: monthly });
-      }
+      const successTxns = revenueData || [];
+      setSuccessfulPayments(successTxns);
+
+      // --- NEW: Detailed Analytics Calculations ---
+      const now = new Date();
+      const currentMonth = now.getMonth();
+      const currentYear = now.getFullYear();
+      const lastMonth = currentMonth === 0 ? 11 : currentMonth - 1;
+      const lastMonthYear = currentMonth === 0 ? currentYear - 1 : currentYear;
+
+      const totalRev = successTxns.reduce((sum, txn) => sum + Number(txn.amount), 0);
+      const currInc = successTxns.filter(t => new Date(t.created_at).getMonth() === currentMonth && new Date(t.created_at).getFullYear() === currentYear).reduce((sum, t) => sum + Number(t.amount), 0);
+      const lastInc = successTxns.filter(t => new Date(t.created_at).getMonth() === lastMonth && new Date(t.created_at).getFullYear() === lastMonthYear).reduce((sum, t) => sum + Number(t.amount), 0);
+      
+      const currExp = (expData || []).filter(e => new Date(e.expense_date).getMonth() === currentMonth && new Date(e.expense_date).getFullYear() === currentYear).reduce((sum, e) => sum + Number(e.amount), 0);
+      const lastExp = (expData || []).filter(e => new Date(e.expense_date).getMonth() === lastMonth && new Date(e.expense_date).getFullYear() === lastMonthYear).reduce((sum, e) => sum + Number(e.amount), 0);
+
+      setStats({ totalRevenue: totalRev, collectedThisMonth: currInc });
+      setDetailedStats({ currentIncome: currInc, lastIncome: lastInc, currentExpense: currExp, lastExpense: lastExp });
 
     } catch (error) {
       toast.error('Failed to load dashboard data');
@@ -132,6 +165,28 @@ export default function AdminDashboard() {
   useEffect(() => {
     fetchDashboardData();
   }, [navigate]);
+
+  // --- NEW: Add Expense Logic ---
+  const handleAddExpense = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    try {
+      const { error } = await supabase.from('expenses').insert([{
+        hostel_id: localStorage.getItem('admin_hostel_id'),
+        amount: parseInt(expenseData.amount),
+        description: expenseData.description,
+        expense_date: expenseData.date
+      }]);
+      if (error) throw error;
+      toast.success('Expense Added');
+      setExpenseModalOpen(false);
+      setExpenseData({ amount: '', description: '', date: new Date().toISOString().split('T')[0] });
+      fetchDashboardData();
+    } catch (err) {
+      toast.error('Failed to add expense');
+      setLoading(false);
+    }
+  };
 
   // --- Analytics & Admin Controls ---
   const handleUpdateFee = () => {
@@ -393,10 +448,16 @@ export default function AdminDashboard() {
     }
   };
 
-  const filteredStudents = students.filter(s => 
-    s.full_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    s.room_number.includes(searchTerm)
-  );
+  // --- NEW: Advanced Filtering Logic ---
+  const uniqueRooms = ['all', ...new Set(students.map(s => s.room_number))].sort();
+
+  const filteredStudents = students.filter(s => {
+    const matchSearch = s.full_name.toLowerCase().includes(searchTerm.toLowerCase()) || s.room_number.includes(searchTerm);
+    const bill = getBillingDetails(s.last_paid_date);
+    const matchStatus = filterStatus === 'all' || bill.riskLevel === filterStatus;
+    const matchRoom = filterRoom === 'all' || s.room_number === filterRoom;
+    return matchSearch && matchStatus && matchRoom;
+  });
 
   return (
     <div className="min-h-screen bg-gray-50/50 pb-20">
@@ -421,45 +482,31 @@ export default function AdminDashboard() {
               </button>
             </div>
 
-            {/* --- Tabs & Search --- */}
-            <div className="flex flex-col sm:flex-row gap-3">
-              <div className="flex bg-gray-100 p-1 rounded-xl overflow-x-auto">
-                <button 
-                  onClick={() => setActiveTab('analytics')}
-                  className={`flex-1 sm:flex-none px-4 py-2 text-sm font-bold rounded-lg transition whitespace-nowrap ${activeTab === 'analytics' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
-                >
-                  Analytics
-                </button>
-                <button 
-                  onClick={() => setActiveTab('students')}
-                  className={`flex-1 sm:flex-none px-4 py-2 text-sm font-bold rounded-lg transition whitespace-nowrap ${activeTab === 'students' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
-                >
-                  All Students ({students.length})
-                </button>
-                <button 
-                  onClick={() => setActiveTab('payments')}
-                  className={`flex-1 sm:flex-none px-4 py-2 text-sm font-bold rounded-lg transition whitespace-nowrap relative ${activeTab === 'payments' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
-                >
-                  Approvals 
-                  {pendingPayments.length > 0 && (
-                    <span className="ml-2 bg-red-500 text-white text-[10px] px-2 py-0.5 rounded-full absolute -top-1 -right-1 sm:relative sm:top-auto sm:right-auto">
-                      {pendingPayments.length}
-                    </span>
-                  )}
-                </button>
-              </div>
-
-              {activeTab === 'students' && (
-                <div className="relative flex-1">
-                  <Search className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
-                  <input 
-                    type="text" 
-                    placeholder="Search name or room..." 
-                    className="w-full pl-10 pr-4 py-2 bg-gray-100 border-none rounded-xl focus:bg-white focus:ring-2 focus:ring-indigo-500 transition-all text-sm h-full"
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                  />
-                </div>
-              )}
+            {/* --- Tabs --- */}
+            <div className="flex bg-gray-100 p-1 rounded-xl overflow-x-auto">
+              <button 
+                onClick={() => setActiveTab('analytics')}
+                className={`flex-1 sm:flex-none px-4 py-2 text-sm font-bold rounded-lg transition whitespace-nowrap ${activeTab === 'analytics' || activeTab === 'detailed-analytics' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+              >
+                Analytics
+              </button>
+              <button 
+                onClick={() => setActiveTab('students')}
+                className={`flex-1 sm:flex-none px-4 py-2 text-sm font-bold rounded-lg transition whitespace-nowrap ${activeTab === 'students' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+              >
+                All Students ({students.length})
+              </button>
+              <button 
+                onClick={() => setActiveTab('payments')}
+                className={`flex-1 sm:flex-none px-4 py-2 text-sm font-bold rounded-lg transition whitespace-nowrap relative ${activeTab === 'payments' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}
+              >
+                Approvals 
+                {pendingPayments.length > 0 && (
+                  <span className="ml-2 bg-red-500 text-white text-[10px] px-2 py-0.5 rounded-full absolute -top-1 -right-1 sm:relative sm:top-auto sm:right-auto">
+                    {pendingPayments.length}
+                  </span>
+                )}
+              </button>
             </div>
           </div>
         </div>
@@ -471,7 +518,7 @@ export default function AdminDashboard() {
           <div className="flex justify-center p-10"><Loader2 className="animate-spin text-indigo-600 w-8 h-8" /></div>
         ) : activeTab === 'analytics' ? (
           /* ========================================= */
-          /* ANALYTICS & CONTROLS TAB                  */
+          /* BASIC ANALYTICS & CONTROLS TAB            */
           /* ========================================= */
           <div className="space-y-6 animate-in fade-in">
             {/* Stats Grid */}
@@ -502,6 +549,12 @@ export default function AdminDashboard() {
               </div>
             </div>
 
+            {/* Go to Detailed Analytics Button */}
+            <button onClick={() => setActiveTab('detailed-analytics')} className="w-full bg-white border border-indigo-100 hover:bg-indigo-50 text-indigo-700 rounded-2xl p-4 shadow-sm transition flex items-center justify-center gap-2 font-bold group">
+              <BarChart3 className="text-indigo-500 group-hover:scale-110 transition-transform" /> 
+              View Detailed Financial Analytics & Expenses
+            </button>
+
             {/* QR Code Manager */}
             <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100 flex flex-col sm:flex-row items-center gap-6">
               <div className="shrink-0 p-3 bg-gray-50 rounded-xl border border-gray-200">
@@ -524,11 +577,125 @@ export default function AdminDashboard() {
               </div>
             </div>
           </div>
+        ) : activeTab === 'detailed-analytics' ? (
+          /* ========================================= */
+          /* DETAILED ANALYTICS & EXPENSES TAB         */
+          /* ========================================= */
+          <div className="space-y-6 animate-in slide-in-from-right-8 fade-in duration-300">
+            <div className="flex items-center gap-3 mb-2">
+              <button onClick={() => setActiveTab('analytics')} className="p-2 bg-white rounded-full shadow-sm hover:bg-gray-100 transition"><ArrowLeft size={20}/></button>
+              <h2 className="text-xl font-bold text-gray-900">Financial Overview</h2>
+            </div>
+
+            {/* Detailed Stats Row */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+               <div className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm border-l-4 border-l-emerald-500">
+                  <p className="text-sm text-gray-500 font-medium mb-1">Net Income (Current Month)</p>
+                  <h3 className="text-2xl font-bold text-gray-900">₹{detailedStats.currentIncome.toLocaleString()}</h3>
+                  <p className={`text-xs mt-2 flex items-center gap-1 font-medium ${detailedStats.currentIncome >= detailedStats.lastIncome ? 'text-emerald-600' : 'text-red-500'}`}>
+                    {detailedStats.currentIncome >= detailedStats.lastIncome ? <TrendingUp size={14}/> : <TrendingDown size={14}/>}
+                    vs ₹{detailedStats.lastIncome.toLocaleString()} last mo.
+                  </p>
+               </div>
+               <div className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm border-l-4 border-l-red-500">
+                  <p className="text-sm text-gray-500 font-medium mb-1">Expenses (Current Month)</p>
+                  <h3 className="text-2xl font-bold text-gray-900">₹{detailedStats.currentExpense.toLocaleString()}</h3>
+                  <p className={`text-xs mt-2 flex items-center gap-1 font-medium ${detailedStats.currentExpense <= detailedStats.lastExpense ? 'text-emerald-600' : 'text-red-500'}`}>
+                    {detailedStats.currentExpense <= detailedStats.lastExpense ? <TrendingDown size={14}/> : <TrendingUp size={14}/>}
+                    vs ₹{detailedStats.lastExpense.toLocaleString()} last mo.
+                  </p>
+               </div>
+               <div className="bg-gray-900 text-white p-5 rounded-2xl shadow-lg border-l-4 border-l-indigo-500">
+                  <p className="text-sm text-gray-400 font-medium mb-1">Net Profit (This Month)</p>
+                  <h3 className="text-2xl font-bold">₹{(detailedStats.currentIncome - detailedStats.currentExpense).toLocaleString()}</h3>
+                  <p className="text-xs text-gray-400 mt-2 font-medium">Income minus Expenses</p>
+               </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              {/* Income List */}
+              <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
+                <h3 className="font-bold text-gray-900 mb-4 flex items-center gap-2"><Wallet size={18} className="text-emerald-500"/> Recent Payments</h3>
+                <div className="space-y-3 max-h-[400px] overflow-y-auto pr-2">
+                  {successfulPayments.length === 0 ? <p className="text-sm text-gray-400">No payments found.</p> :
+                    successfulPayments.map((txn, i) => (
+                      <div key={i} className="flex justify-between items-center p-3 bg-gray-50 rounded-xl">
+                        <div>
+                          <p className="font-bold text-sm text-gray-900">{txn.students.full_name}</p>
+                          <p className="text-xs text-gray-500">Room {txn.students.room_number} • {new Date(txn.created_at).toLocaleDateString()}</p>
+                        </div>
+                        <span className="font-bold text-emerald-600">+₹{txn.amount}</span>
+                      </div>
+                    ))
+                  }
+                </div>
+              </div>
+
+              {/* Expense List */}
+              <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
+                <div className="flex justify-between items-center mb-4">
+                  <h3 className="font-bold text-gray-900 flex items-center gap-2"><Receipt size={18} className="text-red-500"/> Recent Expenses</h3>
+                  <button onClick={() => setExpenseModalOpen(true)} className="bg-indigo-50 text-indigo-700 px-3 py-1.5 rounded-lg text-xs font-bold hover:bg-indigo-100 transition flex items-center gap-1">
+                    <PlusCircle size={14}/> Add
+                  </button>
+                </div>
+                <div className="space-y-3 max-h-[400px] overflow-y-auto pr-2">
+                  {expenses.length === 0 ? <p className="text-sm text-gray-400">No expenses recorded.</p> :
+                    expenses.map((exp, i) => (
+                      <div key={i} className="flex justify-between items-center p-3 bg-red-50/50 rounded-xl">
+                        <div>
+                          <p className="font-bold text-sm text-gray-900 capitalize">{exp.description}</p>
+                          <p className="text-xs text-gray-500">{new Date(exp.expense_date).toLocaleDateString()}</p>
+                        </div>
+                        <span className="font-bold text-red-600">-₹{exp.amount}</span>
+                      </div>
+                    ))
+                  }
+                </div>
+              </div>
+            </div>
+          </div>
         ) : activeTab === 'students' ? (
           /* ========================================= */
-          /* STUDENTS TAB                              */
+          /* STUDENTS TAB WITH ADVANCED FILTERS        */
           /* ========================================= */
-          <>
+          <div className="space-y-4 animate-in fade-in">
+            {/* Advanced Filters Area */}
+            <div className="bg-white p-3 rounded-2xl shadow-sm border border-gray-100 flex flex-col sm:flex-row gap-3">
+              <div className="relative flex-1">
+                <Search className="absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
+                <input 
+                  type="text" 
+                  placeholder="Search name..." 
+                  className="w-full pl-9 pr-4 py-2 bg-gray-50 border-none rounded-xl focus:ring-2 focus:ring-indigo-500 outline-none text-sm" 
+                  onChange={e => setSearchTerm(e.target.value)} 
+                />
+              </div>
+              <div className="flex gap-2 flex-1 sm:flex-none">
+                <div className="relative w-full sm:w-32">
+                  <Filter className="absolute left-2.5 top-2.5 h-4 w-4 text-gray-400 pointer-events-none" />
+                  <select 
+                    className="w-full pl-8 pr-3 py-2 bg-gray-50 border-none rounded-xl text-sm font-medium text-gray-700 outline-none appearance-none" 
+                    value={filterRoom} 
+                    onChange={e => setFilterRoom(e.target.value)}
+                  >
+                    {uniqueRooms.map(r => <option key={r} value={r}>{r === 'all' ? 'All Rooms' : `Rm ${r}`}</option>)}
+                  </select>
+                </div>
+                <select 
+                  className="w-full sm:w-36 px-3 py-2 bg-gray-50 border-none rounded-xl text-sm font-medium text-gray-700 outline-none" 
+                  value={filterStatus} 
+                  onChange={e => setFilterStatus(e.target.value)}
+                >
+                  <option value="all">All Status</option>
+                  <option value="safe">Paid (Safe)</option>
+                  <option value="warning">Due Soon</option>
+                  <option value="critical">Overdue</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Render Students */}
             {filteredStudents.map((student) => {
               const bill = getBillingDetails(student.last_paid_date);
               const isExpanded = expandedId === student.id;
@@ -550,7 +717,6 @@ export default function AdminDashboard() {
                       </div>
                     </div>
                     
-                    {/* Individual Fee Edit Button */}
                     <button 
                       onClick={(e) => handleUpdateStudentFee(e, student.id, studentFee)} 
                       className="text-xs bg-indigo-50 text-indigo-700 px-2 py-1.5 rounded-lg font-bold hover:bg-indigo-100 border border-indigo-100 flex items-center gap-1 shadow-sm transition"
@@ -603,16 +769,16 @@ export default function AdminDashboard() {
             {filteredStudents.length === 0 && (
                <div className="text-center py-20 text-gray-400">
                   <div className="bg-gray-100 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-3"><User className="w-8 h-8 opacity-40" /></div>
-                  <p className="font-medium text-gray-500">No students found</p>
-                  <p className="text-sm mt-1">Try adjusting your search criteria.</p>
+                  <p className="font-medium text-gray-500">No students match your filters</p>
+                  <p className="text-sm mt-1">Try adjusting the search or dropdowns.</p>
                </div>
             )}
-          </>
+          </div>
         ) : (
           /* ========================================= */
           /* PENDING PAYMENTS TAB                      */
           /* ========================================= */
-          <div className="space-y-4">
+          <div className="space-y-4 animate-in fade-in">
             {pendingPayments.length === 0 ? (
               <div className="text-center py-20 text-gray-400 bg-white rounded-2xl border border-gray-100 border-dashed">
                 <CheckCircle className="w-12 h-12 mx-auto mb-3 text-emerald-300" />
@@ -673,7 +839,7 @@ export default function AdminDashboard() {
         )}
       </div>
 
-      {/* --- NEW: Global Modal System UI --- */}
+      {/* --- Global Modal System UI --- */}
       {modalConfig.isOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-gray-900/60 backdrop-blur-sm animate-in fade-in">
           <div className="bg-white w-full max-w-sm rounded-3xl p-6 shadow-2xl animate-in zoom-in-95">
@@ -710,6 +876,68 @@ export default function AdminDashboard() {
           </div>
         </div>
       )}
+
+      {/* --- Add Expense Modal --- */}
+      {expenseModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-gray-900/60 backdrop-blur-sm animate-in fade-in">
+          <div className="bg-white w-full max-w-sm rounded-3xl p-6 shadow-2xl animate-in zoom-in-95">
+            <h2 className="text-xl font-bold text-gray-900 mb-4 flex items-center gap-2">
+              <Receipt size={20} className="text-red-500"/> Log New Expense
+            </h2>
+            <form onSubmit={handleAddExpense} className="space-y-4">
+              <div>
+                <label className="text-xs font-bold text-gray-500 mb-1 block">Amount (₹)</label>
+                <input 
+                  type="number" 
+                  required 
+                  value={expenseData.amount} 
+                  onChange={e => setExpenseData({...expenseData, amount: e.target.value})} 
+                  className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 font-bold text-lg focus:ring-2 focus:ring-indigo-500 outline-none" 
+                  placeholder="e.g. 1500" 
+                />
+              </div>
+              <div>
+                <label className="text-xs font-bold text-gray-500 mb-1 block">Description</label>
+                <input 
+                  type="text" 
+                  required 
+                  value={expenseData.description} 
+                  onChange={e => setExpenseData({...expenseData, description: e.target.value})} 
+                  className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-indigo-500 outline-none" 
+                  placeholder="e.g. Electricity Bill, Groceries" 
+                />
+              </div>
+              <div>
+                <label className="text-xs font-bold text-gray-500 mb-1 block">Date</label>
+                <input 
+                  type="date" 
+                  required 
+                  value={expenseData.date} 
+                  onChange={e => setExpenseData({...expenseData, date: e.target.value})} 
+                  className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-indigo-500 outline-none" 
+                />
+              </div>
+              <div className="flex gap-3 pt-2">
+                <button 
+                  type="button" 
+                  onClick={() => setExpenseModalOpen(false)} 
+                  className="flex-1 bg-gray-100 text-gray-700 py-3 rounded-xl font-bold hover:bg-gray-200 transition"
+                >
+                  Cancel
+                </button>
+                <button 
+                  type="submit" 
+                  disabled={loading}
+                  className="flex-1 bg-gray-900 text-white py-3 rounded-xl font-bold hover:bg-black transition shadow-md flex justify-center items-center"
+                >
+                  {loading ? <Loader2 className="animate-spin" /> : 'Add Expense'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }
