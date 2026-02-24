@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabaseClient';
-import { Trash2, Search, Loader2, User, Phone, FileText, MessageCircle, ChevronDown, ChevronUp, Calendar, PhoneCall, FileDown, Image as ImageIcon, LogOut, CheckCircle, XCircle, Eye, IndianRupee, Edit2, TrendingUp, Users, Wallet, Upload, QrCode, Filter, ArrowLeft, PlusCircle, Receipt, TrendingDown, BarChart3 } from 'lucide-react';
+import { Trash2, Search, Loader2, User, Phone, FileText, MessageCircle, ChevronDown, ChevronUp, Calendar, PhoneCall, FileDown, Image as ImageIcon, LogOut, CheckCircle, XCircle, Eye, IndianRupee, Edit2, TrendingUp, Users, Wallet, Upload, QrCode, Filter, ArrowLeft, PlusCircle, Receipt, TrendingDown, BarChart3, AlertTriangle, Calculator } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { jsPDF } from 'jspdf';
 import { useNavigate } from 'react-router-dom';
@@ -35,18 +35,25 @@ export default function AdminDashboard() {
   const [currentFee, setCurrentFee] = useState(3000); // Default fee state
   const [qrCodeUrl, setQrCodeUrl] = useState(null);
   
-  // --- NEW: Detailed Analytics & Expense States ---
+  // --- Detailed Analytics & Expense States ---
   const [expenses, setExpenses] = useState([]);
   const [successfulPayments, setSuccessfulPayments] = useState([]);
   const [stats, setStats] = useState({ totalRevenue: 0, collectedThisMonth: 0 });
-  const [detailedStats, setDetailedStats] = useState({ currentIncome: 0, lastIncome: 0, currentExpense: 0, lastExpense: 0 });
+  const [detailedStats, setDetailedStats] = useState({ 
+    currentIncome: 0, lastIncome: 0, currentExpense: 0, lastExpense: 0,
+    expectedRev: 0, pendingDues: 0, profitMargin: 0 
+  });
   
+  // --- NEW: Include/Exclude Sandbox States ---
+  const [excludedTxns, setExcludedTxns] = useState(new Set());
+  const [excludedExpenses, setExcludedExpenses] = useState(new Set());
+
   // UI States
   const [activeTab, setActiveTab] = useState('analytics'); // Default to the new dashboard view
   const [searchTerm, setSearchTerm] = useState('');
   const [expandedId, setExpandedId] = useState(null);
 
-  // --- NEW: Filter States ---
+  // --- Filter States ---
   const [filterRoom, setFilterRoom] = useState('all');
   const [filterStatus, setFilterStatus] = useState('all');
 
@@ -62,7 +69,7 @@ export default function AdminDashboard() {
   });
   const [promptValue, setPromptValue] = useState('');
   
-  // --- NEW: Expense Modal State ---
+  // --- Expense Modal State ---
   const [expenseModalOpen, setExpenseModalOpen] = useState(false);
   const [expenseData, setExpenseData] = useState({ amount: '', description: '', date: new Date().toISOString().split('T')[0] });
 
@@ -91,9 +98,11 @@ export default function AdminDashboard() {
     try {
       // Fetch Hostel Name, Default Fee & QR
       const { data: hostelData } = await supabase.from('hostels').select('name, default_fee, qr_code_url').eq('id', hostelId).single();
+      let stdFee = 3000;
       if (hostelData) {
         setHostelName(hostelData.name);
-        setCurrentFee(hostelData.default_fee || 3000);
+        stdFee = hostelData.default_fee || 3000;
+        setCurrentFee(stdFee);
         setQrCodeUrl(hostelData.qr_code_url);
       }
 
@@ -104,7 +113,8 @@ export default function AdminDashboard() {
         .eq('hostel_id', hostelId)
         .order('created_at', { ascending: false });
       if (stuError) throw stuError;
-      setStudents(studentsData);
+      const activeStudents = studentsData || [];
+      setStudents(activeStudents);
 
       // Fetch Pending Payments with Student Info joined
       const { data: payData, error: payError } = await supabase
@@ -117,20 +127,21 @@ export default function AdminDashboard() {
         .eq('students.hostel_id', hostelId)
         .order('created_at', { ascending: false });
       if (payError) throw payError;
-      setPendingPayments(payData);
+      setPendingPayments(payData || []);
 
-      // --- NEW: Fetch Expenses ---
+      // Fetch Expenses
       const { data: expData } = await supabase
         .from('expenses')
         .select('*')
         .eq('hostel_id', hostelId)
         .order('expense_date', { ascending: false });
-      setExpenses(expData || []);
+      const expensesList = expData || [];
+      setExpenses(expensesList);
 
-      // Calculate Financials
+      // Fetch Successful Payments for Analytics
       const { data: revenueData } = await supabase
         .from('payments')
-        .select('amount, created_at, students!inner(hostel_id, full_name, room_number)')
+        .select('id, amount, created_at, students!inner(hostel_id, full_name, room_number)')
         .eq('status', 'success')
         .eq('students.hostel_id', hostelId)
         .order('created_at', { ascending: false });
@@ -138,22 +149,28 @@ export default function AdminDashboard() {
       const successTxns = revenueData || [];
       setSuccessfulPayments(successTxns);
 
-      // --- NEW: Detailed Analytics Calculations ---
-      const now = new Date();
-      const currentMonth = now.getMonth();
-      const currentYear = now.getFullYear();
-      const lastMonth = currentMonth === 0 ? 11 : currentMonth - 1;
-      const lastMonthYear = currentMonth === 0 ? currentYear - 1 : currentYear;
-
-      const totalRev = successTxns.reduce((sum, txn) => sum + Number(txn.amount), 0);
-      const currInc = successTxns.filter(t => new Date(t.created_at).getMonth() === currentMonth && new Date(t.created_at).getFullYear() === currentYear).reduce((sum, t) => sum + Number(t.amount), 0);
-      const lastInc = successTxns.filter(t => new Date(t.created_at).getMonth() === lastMonth && new Date(t.created_at).getFullYear() === lastMonthYear).reduce((sum, t) => sum + Number(t.amount), 0);
+      // --- NEW: Silent 30-Day Proof Cleanup ---
+      const thirtyDaysAgo = new Date();
+      thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
       
-      const currExp = (expData || []).filter(e => new Date(e.expense_date).getMonth() === currentMonth && new Date(e.expense_date).getFullYear() === currentYear).reduce((sum, e) => sum + Number(e.amount), 0);
-      const lastExp = (expData || []).filter(e => new Date(e.expense_date).getMonth() === lastMonth && new Date(e.expense_date).getFullYear() === lastMonthYear).reduce((sum, e) => sum + Number(e.amount), 0);
-
-      setStats({ totalRevenue: totalRev, collectedThisMonth: currInc });
-      setDetailedStats({ currentIncome: currInc, lastIncome: lastInc, currentExpense: currExp, lastExpense: lastExp });
+      supabase.from('payments')
+        .select('id, proof_url')
+        .not('proof_url', 'is', null)
+        .lt('created_at', thirtyDaysAgo.toISOString())
+        .then(({ data: oldProofs }) => {
+           if (oldProofs && oldProofs.length > 0) {
+             oldProofs.forEach(async (p) => {
+               try {
+                 const urlParts = p.proof_url.split('/payment-proofs/');
+                 if (urlParts.length > 1) {
+                   const fileName = urlParts[1];
+                   await supabase.storage.from('payment-proofs').remove([fileName]);
+                   await supabase.from('payments').update({ proof_url: null }).eq('id', p.id);
+                 }
+               } catch(e) { console.error("Cleanup error"); }
+             });
+           }
+        });
 
     } catch (error) {
       toast.error('Failed to load dashboard data');
@@ -166,7 +183,77 @@ export default function AdminDashboard() {
     fetchDashboardData();
   }, [navigate]);
 
-  // --- NEW: Add Expense Logic ---
+  // --- NEW: Dynamic Analytics Sandbox Calculations ---
+  useEffect(() => {
+    if (!successfulPayments || !expenses || !students) return;
+
+    // Filter out user-excluded items
+    const activeTxns = successfulPayments.filter(t => !excludedTxns.has(t.id));
+    const activeExps = expenses.filter(e => !excludedExpenses.has(e.id));
+
+    const now = new Date();
+    const currentMonth = now.getMonth();
+    const currentYear = now.getFullYear();
+    const lastMonth = currentMonth === 0 ? 11 : currentMonth - 1;
+    const lastMonthYear = currentMonth === 0 ? currentYear - 1 : currentYear;
+
+    const totalRev = activeTxns.reduce((sum, txn) => sum + Number(txn.amount), 0);
+    const currInc = activeTxns.filter(t => new Date(t.created_at).getMonth() === currentMonth && new Date(t.created_at).getFullYear() === currentYear).reduce((sum, t) => sum + Number(t.amount), 0);
+    const lastInc = activeTxns.filter(t => new Date(t.created_at).getMonth() === lastMonth && new Date(t.created_at).getFullYear() === lastMonthYear).reduce((sum, t) => sum + Number(t.amount), 0);
+    
+    const currExp = activeExps.filter(e => new Date(e.expense_date).getMonth() === currentMonth && new Date(e.expense_date).getFullYear() === currentYear).reduce((sum, e) => sum + Number(e.amount), 0);
+    const lastExp = activeExps.filter(e => new Date(e.expense_date).getMonth() === lastMonth && new Date(e.expense_date).getFullYear() === lastMonthYear).reduce((sum, e) => sum + Number(e.amount), 0);
+
+    const expectedRev = students.reduce((sum, s) => sum + (s.monthly_fee || currentFee), 0);
+    const pendingDues = Math.max(0, expectedRev - currInc);
+    const profitMargin = currInc > 0 ? Math.round(((currInc - currExp) / currInc) * 100) : 0;
+
+    setStats({ totalRevenue: totalRev, collectedThisMonth: currInc });
+    setDetailedStats({ 
+      currentIncome: currInc, lastIncome: lastInc, 
+      currentExpense: currExp, lastExpense: lastExp,
+      expectedRev, pendingDues, profitMargin
+    });
+  }, [successfulPayments, expenses, students, excludedTxns, excludedExpenses, currentFee]);
+
+  const toggleExcludeTxn = (id) => {
+    setExcludedTxns(prev => { const next = new Set(prev); if (next.has(id)) next.delete(id); else next.add(id); return next; });
+  };
+  
+  const toggleExcludeExp = (id) => {
+    setExcludedExpenses(prev => { const next = new Set(prev); if (next.has(id)) next.delete(id); else next.add(id); return next; });
+  };
+
+  // --- Utility Functions ---
+  const getBillingDetails = (lastPaidDateString) => {
+    if (!lastPaidDateString) return { nextBillDate: 'N/A', daysLeft: 0, statusColor: 'text-gray-400', riskLevel: 'low' };
+
+    const lastPaid = new Date(lastPaidDateString);
+    const nextBill = new Date(lastPaid);
+    nextBill.setDate(lastPaid.getDate() + 30);
+    
+    const today = new Date();
+    today.setHours(0,0,0,0);
+    nextBill.setHours(0,0,0,0);
+
+    const diffTime = nextBill - today;
+    const daysLeft = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+    let statusColor = 'text-emerald-600 bg-emerald-50';
+    let riskLevel = 'safe'; 
+
+    if (daysLeft <= 3) {
+      statusColor = 'text-red-600 bg-red-50';
+      riskLevel = 'critical';
+    } else if (daysLeft <= 7) {
+      statusColor = 'text-amber-600 bg-amber-50';
+      riskLevel = 'warning';
+    }
+
+    return { nextBillDate: nextBill.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }), daysLeft, statusColor, riskLevel };
+  };
+
+  // --- Expense Logic ---
   const handleAddExpense = async (e) => {
     e.preventDefault();
     setLoading(true);
@@ -188,6 +275,18 @@ export default function AdminDashboard() {
     }
   };
 
+  const handleDeleteExpense = (expId) => {
+    showConfirmModal("Delete Expense", "Remove this expense record permanently?", true, async () => {
+      const { error } = await supabase.from('expenses').delete().eq('id', expId);
+      if (!error) {
+        toast.success('Expense deleted');
+        fetchDashboardData();
+      } else {
+        toast.error('Failed to delete expense');
+      }
+    });
+  };
+
   // --- Analytics & Admin Controls ---
   const handleUpdateFee = () => {
     showPromptModal(
@@ -204,6 +303,7 @@ export default function AdminDashboard() {
         if (!error) {
           setCurrentFee(parsedFee);
           toast.success('Default fee updated!');
+          fetchDashboardData();
         } else {
           toast.error('Failed to update fee');
         }
@@ -212,7 +312,7 @@ export default function AdminDashboard() {
   };
 
   const handleUpdateStudentFee = (e, studentId, currentVal) => {
-    e.stopPropagation(); // Prevent the accordion from opening
+    e.stopPropagation(); 
     showPromptModal(
       "Update Student Fee",
       "Enter CUSTOM fee for this student (₹):",
@@ -276,7 +376,7 @@ export default function AdminDashboard() {
     showConfirmModal(
       "Reject Payment",
       "Are you sure you want to reject this payment?",
-      true, // isDestructive = true
+      true, 
       async () => {
         const toastId = toast.loading('Rejecting payment...');
         try {
@@ -291,7 +391,6 @@ export default function AdminDashboard() {
     );
   };
 
-  // --- Utility Functions ---
   const handleLogout = () => {
     localStorage.removeItem('admin_hostel_id');
     navigate('/login');
@@ -301,12 +400,13 @@ export default function AdminDashboard() {
     showConfirmModal(
       "Permanently Delete Student?",
       "This action cannot be undone. All data associated with this student will be lost.",
-      true, // isDestructive = true
+      true, 
       async () => {
         const { error } = await supabase.from('students').delete().eq('id', id);
         if (!error) {
           setStudents(students.filter(s => s.id !== id));
           toast.success('Student removed');
+          fetchDashboardData();
         } else {
           toast.error('Failed to delete student');
         }
@@ -316,34 +416,6 @@ export default function AdminDashboard() {
 
   const toggleExpand = (id) => {
     setExpandedId(expandedId === id ? null : id);
-  };
-
-  const getBillingDetails = (lastPaidDateString) => {
-    if (!lastPaidDateString) return { nextBillDate: 'N/A', daysLeft: 0, statusColor: 'text-gray-400', riskLevel: 'low' };
-
-    const lastPaid = new Date(lastPaidDateString);
-    const nextBill = new Date(lastPaid);
-    nextBill.setDate(lastPaid.getDate() + 30);
-    
-    const today = new Date();
-    today.setHours(0,0,0,0);
-    nextBill.setHours(0,0,0,0);
-
-    const diffTime = nextBill - today;
-    const daysLeft = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-
-    let statusColor = 'text-emerald-600 bg-emerald-50';
-    let riskLevel = 'safe'; 
-
-    if (daysLeft <= 3) {
-      statusColor = 'text-red-600 bg-red-50';
-      riskLevel = 'critical';
-    } else if (daysLeft <= 7) {
-      statusColor = 'text-amber-600 bg-amber-50';
-      riskLevel = 'warning';
-    }
-
-    return { nextBillDate: nextBill.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }), daysLeft, statusColor, riskLevel };
   };
 
   const handleDownloadImage = async (url, name) => {
@@ -448,7 +520,36 @@ export default function AdminDashboard() {
     }
   };
 
-  // --- NEW: Advanced Filtering Logic ---
+  // --- NEW: Generate Financial Report ---
+  const handleDownloadFinancialReport = () => {
+    const doc = new jsPDF();
+    doc.setFillColor(79, 70, 229); doc.rect(0, 0, 210, 30, 'F');
+    doc.setTextColor(255, 255, 255); doc.setFontSize(18); doc.setFont('helvetica', 'bold');
+    doc.text(`${hostelName.toUpperCase()} - FINANCIAL REPORT`, 105, 18, { align: 'center' });
+    
+    doc.setTextColor(50, 50, 50); doc.setFontSize(12); doc.setFont('helvetica', 'normal');
+    doc.text(`Report Generated: ${new Date().toLocaleDateString()}`, 20, 40);
+    
+    doc.setFontSize(14); doc.setFont('helvetica', 'bold'); doc.text('Monthly Summary', 20, 55);
+    doc.line(20, 58, 190, 58);
+    
+    doc.setFontSize(12); doc.setFont('helvetica', 'normal');
+    doc.text(`Total Expected Revenue: Rs. ${detailedStats.expectedRev.toLocaleString()}`, 20, 70);
+    doc.text(`Actual Collected Income: Rs. ${detailedStats.currentIncome.toLocaleString()}`, 20, 80);
+    doc.text(`Pending Dues: Rs. ${detailedStats.pendingDues.toLocaleString()}`, 20, 90);
+    doc.text(`Total Expenses: Rs. ${detailedStats.currentExpense.toLocaleString()}`, 20, 100);
+    
+    doc.setFont('helvetica', 'bold');
+    const netProfit = detailedStats.currentIncome - detailedStats.currentExpense;
+    doc.setTextColor(netProfit >= 0 ? 34 : 220, netProfit >= 0 ? 197 : 38, netProfit >= 0 ? 94 : 38);
+    doc.text(`Net Profit: Rs. ${netProfit.toLocaleString()}`, 20, 115);
+    doc.text(`Profit Margin: ${detailedStats.profitMargin}%`, 20, 125);
+    
+    doc.save(`${hostelName.replace(/\s+/g, '_')}_Financial_Report.pdf`);
+    toast.success('Report Downloaded!');
+  };
+
+  // --- Advanced Filtering Logic ---
   const uniqueRooms = ['all', ...new Set(students.map(s => s.room_number))].sort();
 
   const filteredStudents = students.filter(s => {
@@ -458,6 +559,11 @@ export default function AdminDashboard() {
     const matchRoom = filterRoom === 'all' || s.room_number === filterRoom;
     return matchSearch && matchStatus && matchRoom;
   });
+
+  const unpaidStudents = students.filter(s => {
+    const bill = getBillingDetails(s.last_paid_date);
+    return bill.riskLevel === 'critical' || bill.riskLevel === 'warning';
+  }).sort((a, b) => getBillingDetails(a.last_paid_date).daysLeft - getBillingDetails(b.last_paid_date).daysLeft);
 
   return (
     <div className="min-h-screen bg-gray-50/50 pb-20">
@@ -579,54 +685,88 @@ export default function AdminDashboard() {
           </div>
         ) : activeTab === 'detailed-analytics' ? (
           /* ========================================= */
-          /* DETAILED ANALYTICS & EXPENSES TAB         */
+          /* NEW: DETAILED ANALYTICS & EXPENSES TAB    */
           /* ========================================= */
           <div className="space-y-6 animate-in slide-in-from-right-8 fade-in duration-300">
-            <div className="flex items-center gap-3 mb-2">
-              <button onClick={() => setActiveTab('analytics')} className="p-2 bg-white rounded-full shadow-sm hover:bg-gray-100 transition"><ArrowLeft size={20}/></button>
-              <h2 className="text-xl font-bold text-gray-900">Financial Overview</h2>
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-3">
+                <button onClick={() => setActiveTab('analytics')} className="p-2 bg-white rounded-full shadow-sm hover:bg-gray-100 transition"><ArrowLeft size={20}/></button>
+                <h2 className="text-xl font-bold text-gray-900">Financial Overview</h2>
+              </div>
+              <button onClick={handleDownloadFinancialReport} className="bg-indigo-50 text-indigo-700 px-4 py-2 rounded-xl text-sm font-bold hover:bg-indigo-100 transition flex items-center gap-2">
+                <FileDown size={16}/> Export Report
+              </button>
+            </div>
+
+            {/* Visual Cash Flow Bar */}
+            <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
+              <div className="flex justify-between items-end mb-3">
+                <div>
+                  <h3 className="font-bold text-gray-900 flex items-center gap-2">Cash Flow Sandbox <Calculator size={16} className="text-indigo-500"/></h3>
+                  <p className="text-xs text-gray-500 mt-1">Use the toggles in the lists below to temporarily include/exclude items.</p>
+                </div>
+                <div className="text-right">
+                  <span className="text-lg font-bold text-gray-900">{detailedStats.profitMargin}%</span>
+                  <p className="text-xs text-gray-500 font-medium">Profit Margin</p>
+                </div>
+              </div>
+              <div className="w-full bg-gray-100 rounded-full h-5 flex overflow-hidden border border-gray-200 shadow-inner">
+                {detailedStats.currentIncome === 0 && detailedStats.currentExpense === 0 ? (
+                   <div className="w-full bg-gray-200 h-full"></div>
+                ) : (
+                  <>
+                    <div className="bg-emerald-500 h-full transition-all duration-1000" style={{ width: `${(detailedStats.currentIncome / (detailedStats.currentIncome + detailedStats.currentExpense)) * 100}%` }}></div>
+                    <div className="bg-red-500 h-full transition-all duration-1000" style={{ width: `${(detailedStats.currentExpense / (detailedStats.currentIncome + detailedStats.currentExpense)) * 100}%` }}></div>
+                  </>
+                )}
+              </div>
+              <div className="flex justify-between mt-2 text-xs font-bold">
+                <span className="text-emerald-600">IN: ₹{detailedStats.currentIncome.toLocaleString()}</span>
+                <span className="text-red-500">OUT: ₹{detailedStats.currentExpense.toLocaleString()}</span>
+              </div>
             </div>
 
             {/* Detailed Stats Row */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-               <div className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm border-l-4 border-l-emerald-500">
-                  <p className="text-sm text-gray-500 font-medium mb-1">Net Income (Current Month)</p>
-                  <h3 className="text-2xl font-bold text-gray-900">₹{detailedStats.currentIncome.toLocaleString()}</h3>
-                  <p className={`text-xs mt-2 flex items-center gap-1 font-medium ${detailedStats.currentIncome >= detailedStats.lastIncome ? 'text-emerald-600' : 'text-red-500'}`}>
-                    {detailedStats.currentIncome >= detailedStats.lastIncome ? <TrendingUp size={14}/> : <TrendingDown size={14}/>}
-                    vs ₹{detailedStats.lastIncome.toLocaleString()} last mo.
-                  </p>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+               <div className="bg-white p-4 rounded-2xl border border-gray-100 shadow-sm border-b-4 border-b-emerald-500">
+                  <p className="text-xs text-gray-500 font-medium mb-1">Net Income</p>
+                  <h3 className="text-xl font-bold text-gray-900">₹{detailedStats.currentIncome.toLocaleString()}</h3>
                </div>
-               <div className="bg-white p-5 rounded-2xl border border-gray-100 shadow-sm border-l-4 border-l-red-500">
-                  <p className="text-sm text-gray-500 font-medium mb-1">Expenses (Current Month)</p>
-                  <h3 className="text-2xl font-bold text-gray-900">₹{detailedStats.currentExpense.toLocaleString()}</h3>
-                  <p className={`text-xs mt-2 flex items-center gap-1 font-medium ${detailedStats.currentExpense <= detailedStats.lastExpense ? 'text-emerald-600' : 'text-red-500'}`}>
-                    {detailedStats.currentExpense <= detailedStats.lastExpense ? <TrendingDown size={14}/> : <TrendingUp size={14}/>}
-                    vs ₹{detailedStats.lastExpense.toLocaleString()} last mo.
-                  </p>
+               <div className="bg-white p-4 rounded-2xl border border-gray-100 shadow-sm border-b-4 border-b-red-500">
+                  <p className="text-xs text-gray-500 font-medium mb-1">Expenses</p>
+                  <h3 className="text-xl font-bold text-gray-900">₹{detailedStats.currentExpense.toLocaleString()}</h3>
                </div>
-               <div className="bg-gray-900 text-white p-5 rounded-2xl shadow-lg border-l-4 border-l-indigo-500">
-                  <p className="text-sm text-gray-400 font-medium mb-1">Net Profit (This Month)</p>
-                  <h3 className="text-2xl font-bold">₹{(detailedStats.currentIncome - detailedStats.currentExpense).toLocaleString()}</h3>
-                  <p className="text-xs text-gray-400 mt-2 font-medium">Income minus Expenses</p>
+               <div className="bg-white p-4 rounded-2xl border border-gray-100 shadow-sm border-b-4 border-b-amber-500">
+                  <p className="text-xs text-gray-500 font-medium mb-1">Pending Dues</p>
+                  <h3 className="text-xl font-bold text-gray-900">₹{detailedStats.pendingDues.toLocaleString()}</h3>
+               </div>
+               <div className="bg-gray-900 text-white p-4 rounded-2xl shadow-lg border-b-4 border-b-indigo-500">
+                  <p className="text-xs text-gray-400 font-medium mb-1">Net Profit</p>
+                  <h3 className="text-xl font-bold">₹{(detailedStats.currentIncome - detailedStats.currentExpense).toLocaleString()}</h3>
                </div>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {/* Income List */}
+              {/* Unpaid / Defaulters List */}
               <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
-                <h3 className="font-bold text-gray-900 mb-4 flex items-center gap-2"><Wallet size={18} className="text-emerald-500"/> Recent Payments</h3>
-                <div className="space-y-3 max-h-[400px] overflow-y-auto pr-2">
-                  {successfulPayments.length === 0 ? <p className="text-sm text-gray-400">No payments found.</p> :
-                    successfulPayments.map((txn, i) => (
-                      <div key={i} className="flex justify-between items-center p-3 bg-gray-50 rounded-xl">
-                        <div>
-                          <p className="font-bold text-sm text-gray-900">{txn.students.full_name}</p>
-                          <p className="text-xs text-gray-500">Room {txn.students.room_number} • {new Date(txn.created_at).toLocaleDateString()}</p>
+                <h3 className="font-bold text-gray-900 mb-4 flex items-center gap-2"><AlertTriangle size={18} className="text-amber-500"/> Action Required: Unpaid</h3>
+                <div className="space-y-3 max-h-[300px] overflow-y-auto pr-2">
+                  {unpaidStudents.length === 0 ? <p className="text-sm text-gray-400">Everyone has paid! 🎉</p> :
+                    unpaidStudents.map((student) => {
+                      const bill = getBillingDetails(student.last_paid_date);
+                      return (
+                        <div key={student.id} className="flex justify-between items-center p-3 bg-gray-50 rounded-xl border-l-4 border-l-amber-400">
+                          <div>
+                            <p className="font-bold text-sm text-gray-900">{student.full_name}</p>
+                            <p className="text-xs text-gray-500">Room {student.room_number}</p>
+                          </div>
+                          <div className="text-right">
+                            <p className={`text-xs font-bold ${bill.riskLevel === 'critical' ? 'text-red-600' : 'text-amber-600'}`}>{bill.daysLeft} Days</p>
+                            <a href={`tel:${student.mobile_number}`} className="text-[10px] text-indigo-600 font-bold hover:underline">Call</a>
+                          </div>
                         </div>
-                        <span className="font-bold text-emerald-600">+₹{txn.amount}</span>
-                      </div>
-                    ))
+                      )
+                    })
                   }
                 </div>
               </div>
@@ -639,20 +779,58 @@ export default function AdminDashboard() {
                     <PlusCircle size={14}/> Add
                   </button>
                 </div>
-                <div className="space-y-3 max-h-[400px] overflow-y-auto pr-2">
+                <div className="space-y-3 max-h-[300px] overflow-y-auto pr-2">
                   {expenses.length === 0 ? <p className="text-sm text-gray-400">No expenses recorded.</p> :
-                    expenses.map((exp, i) => (
-                      <div key={i} className="flex justify-between items-center p-3 bg-red-50/50 rounded-xl">
-                        <div>
-                          <p className="font-bold text-sm text-gray-900 capitalize">{exp.description}</p>
-                          <p className="text-xs text-gray-500">{new Date(exp.expense_date).toLocaleDateString()}</p>
+                    expenses.map((exp) => {
+                      const isExcluded = excludedExpenses.has(exp.id);
+                      return (
+                        <div key={exp.id} className={`flex justify-between items-center p-3 rounded-xl border-l-4 transition-all duration-300 ${isExcluded ? 'bg-gray-50 border-l-gray-300 opacity-60' : 'bg-red-50/50 border-l-red-400'}`}>
+                          <div className="flex items-center gap-3">
+                            <button onClick={() => toggleExcludeExp(exp.id)} title={isExcluded ? "Include in calculation" : "Exclude from calculation"} className="text-gray-400 hover:text-indigo-600 transition">
+                               {isExcluded ? <XCircle size={18} /> : <CheckCircle size={18} />}
+                            </button>
+                            <div>
+                              <p className={`font-bold text-sm capitalize ${isExcluded ? 'text-gray-500 line-through' : 'text-gray-900'}`}>{exp.description}</p>
+                              <p className="text-xs text-gray-500">{new Date(exp.expense_date).toLocaleDateString()}</p>
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-3">
+                            <span className={`font-bold ${isExcluded ? 'text-gray-400 line-through' : 'text-red-600'}`}>-₹{exp.amount}</span>
+                            <button onClick={() => handleDeleteExpense(exp.id)} title="Delete Expense" className="text-red-300 hover:text-red-600 transition p-1"><Trash2 size={16}/></button>
+                          </div>
                         </div>
-                        <span className="font-bold text-red-600">-₹{exp.amount}</span>
-                      </div>
-                    ))
+                      )
+                    })
                   }
                 </div>
               </div>
+              
+              {/* Income List (Full width below) */}
+              <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100 md:col-span-2">
+                <h3 className="font-bold text-gray-900 mb-4 flex items-center gap-2"><Wallet size={18} className="text-emerald-500"/> Recent Payments (Income Sandbox)</h3>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 max-h-[300px] overflow-y-auto pr-2">
+                  {successfulPayments.length === 0 ? <p className="text-sm text-gray-400">No payments found.</p> :
+                    successfulPayments.map((txn) => {
+                      const isExcluded = excludedTxns.has(txn.id);
+                      return (
+                        <div key={txn.id} className={`flex justify-between items-center p-3 rounded-xl border transition-all duration-300 ${isExcluded ? 'bg-gray-50 border-gray-200 opacity-60' : 'bg-emerald-50/30 border-emerald-100'}`}>
+                          <div className="flex items-center gap-3">
+                            <button onClick={() => toggleExcludeTxn(txn.id)} title={isExcluded ? "Include in calculation" : "Exclude from calculation"} className="text-gray-400 hover:text-indigo-600 transition">
+                               {isExcluded ? <XCircle size={18} /> : <CheckCircle size={18} />}
+                            </button>
+                            <div>
+                              <p className={`font-bold text-sm ${isExcluded ? 'text-gray-500 line-through' : 'text-gray-900'}`}>{txn.students.full_name}</p>
+                              <p className="text-xs text-gray-500">Room {txn.students.room_number}</p>
+                            </div>
+                          </div>
+                          <span className={`font-bold ${isExcluded ? 'text-gray-400 line-through' : 'text-emerald-600'}`}>+₹{txn.amount}</span>
+                        </div>
+                      )
+                    })
+                  }
+                </div>
+              </div>
+
             </div>
           </div>
         ) : activeTab === 'students' ? (
