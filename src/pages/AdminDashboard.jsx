@@ -32,8 +32,9 @@ export default function AdminDashboard() {
   const [pendingPayments, setPendingPayments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [hostelName, setHostelName] = useState('');
-  const [currentFee, setCurrentFee] = useState(3000); // Default fee state
+  const [currentFee, setCurrentFee] = useState(3000); 
   const [qrCodeUrl, setQrCodeUrl] = useState(null);
+  const [upiId, setUpiId] = useState(''); 
   
   // --- Detailed Analytics & Expense States ---
   const [expenses, setExpenses] = useState([]);
@@ -44,12 +45,12 @@ export default function AdminDashboard() {
     expectedRev: 0, pendingDues: 0, profitMargin: 0 
   });
   
-  // --- NEW: Include/Exclude Sandbox States ---
+  // --- Include/Exclude Sandbox States ---
   const [excludedTxns, setExcludedTxns] = useState(new Set());
   const [excludedExpenses, setExcludedExpenses] = useState(new Set());
 
   // UI States
-  const [activeTab, setActiveTab] = useState('analytics'); // Default to the new dashboard view
+  const [activeTab, setActiveTab] = useState('analytics'); 
   const [searchTerm, setSearchTerm] = useState('');
   const [expandedId, setExpandedId] = useState(null);
 
@@ -60,7 +61,8 @@ export default function AdminDashboard() {
   // Custom Modal States
   const [modalConfig, setModalConfig] = useState({
     isOpen: false,
-    type: 'confirm', // 'confirm' or 'prompt'
+    type: 'confirm', 
+    inputType: 'number', 
     title: '',
     message: '',
     confirmText: 'Confirm',
@@ -77,12 +79,12 @@ export default function AdminDashboard() {
   const closeModal = () => setModalConfig({ ...modalConfig, isOpen: false });
 
   const showConfirmModal = (title, message, isDestructive, onConfirm) => {
-    setModalConfig({ isOpen: true, type: 'confirm', title, message, confirmText: isDestructive ? 'Delete' : 'Confirm', isDestructive, onConfirm });
+    setModalConfig({ isOpen: true, type: 'confirm', inputType: 'text', title, message, confirmText: isDestructive ? 'Delete' : 'Confirm', isDestructive, onConfirm });
   };
 
-  const showPromptModal = (title, message, defaultValue, onConfirm) => {
+  const showPromptModal = (title, message, defaultValue, onConfirm, inputType = 'number') => {
     setPromptValue(defaultValue);
-    setModalConfig({ isOpen: true, type: 'prompt', title, message, confirmText: 'Save', isDestructive: false, onConfirm });
+    setModalConfig({ isOpen: true, type: 'prompt', inputType, title, message, confirmText: 'Save', isDestructive: false, onConfirm });
   };
 
   // 1. Authentication & Data Fetching
@@ -96,14 +98,15 @@ export default function AdminDashboard() {
     }
 
     try {
-      // Fetch Hostel Name, Default Fee & QR
-      const { data: hostelData } = await supabase.from('hostels').select('name, default_fee, qr_code_url').eq('id', hostelId).single();
+      // Fetch Hostel Name, Default Fee, QR & UPI ID
+      const { data: hostelData } = await supabase.from('hostels').select('name, default_fee, qr_code_url, upi_id').eq('id', hostelId).single();
       let stdFee = 3000;
       if (hostelData) {
         setHostelName(hostelData.name);
         stdFee = hostelData.default_fee || 3000;
         setCurrentFee(stdFee);
         setQrCodeUrl(hostelData.qr_code_url);
+        setUpiId(hostelData.upi_id || ''); 
       }
 
       // Fetch Students
@@ -116,13 +119,10 @@ export default function AdminDashboard() {
       const activeStudents = studentsData || [];
       setStudents(activeStudents);
 
-      // Fetch Pending Payments with Student Info joined
+      // Fetch Pending Payments
       const { data: payData, error: payError } = await supabase
         .from('payments')
-        .select(`
-          *,
-          students!inner ( id, full_name, room_number, hostel_id )
-        `)
+        .select(`*, students!inner ( id, full_name, room_number, hostel_id )`)
         .eq('status', 'pending')
         .eq('students.hostel_id', hostelId)
         .order('created_at', { ascending: false });
@@ -149,7 +149,7 @@ export default function AdminDashboard() {
       const successTxns = revenueData || [];
       setSuccessfulPayments(successTxns);
 
-      // --- NEW: Silent 30-Day Proof Cleanup ---
+      // --- Silent 30-Day Proof Cleanup ---
       const thirtyDaysAgo = new Date();
       thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
       
@@ -179,15 +179,12 @@ export default function AdminDashboard() {
     }
   };
 
-  useEffect(() => {
-    fetchDashboardData();
-  }, [navigate]);
+  useEffect(() => { fetchDashboardData(); }, [navigate]);
 
-  // --- NEW: Dynamic Analytics Sandbox Calculations ---
+  // --- Dynamic Analytics Sandbox Calculations ---
   useEffect(() => {
     if (!successfulPayments || !expenses || !students) return;
 
-    // Filter out user-excluded items
     const activeTxns = successfulPayments.filter(t => !excludedTxns.has(t.id));
     const activeExps = expenses.filter(e => !excludedExpenses.has(e.id));
 
@@ -209,47 +206,22 @@ export default function AdminDashboard() {
     const profitMargin = currInc > 0 ? Math.round(((currInc - currExp) / currInc) * 100) : 0;
 
     setStats({ totalRevenue: totalRev, collectedThisMonth: currInc });
-    setDetailedStats({ 
-      currentIncome: currInc, lastIncome: lastInc, 
-      currentExpense: currExp, lastExpense: lastExp,
-      expectedRev, pendingDues, profitMargin
-    });
+    setDetailedStats({ currentIncome: currInc, lastIncome: lastInc, currentExpense: currExp, lastExpense: lastExp, expectedRev, pendingDues, profitMargin });
   }, [successfulPayments, expenses, students, excludedTxns, excludedExpenses, currentFee]);
 
-  const toggleExcludeTxn = (id) => {
-    setExcludedTxns(prev => { const next = new Set(prev); if (next.has(id)) next.delete(id); else next.add(id); return next; });
-  };
-  
-  const toggleExcludeExp = (id) => {
-    setExcludedExpenses(prev => { const next = new Set(prev); if (next.has(id)) next.delete(id); else next.add(id); return next; });
-  };
+  const toggleExcludeTxn = (id) => { setExcludedTxns(prev => { const next = new Set(prev); if (next.has(id)) next.delete(id); else next.add(id); return next; }); };
+  const toggleExcludeExp = (id) => { setExcludedExpenses(prev => { const next = new Set(prev); if (next.has(id)) next.delete(id); else next.add(id); return next; }); };
 
   // --- Utility Functions ---
   const getBillingDetails = (lastPaidDateString) => {
     if (!lastPaidDateString) return { nextBillDate: 'N/A', daysLeft: 0, statusColor: 'text-gray-400', riskLevel: 'low' };
-
     const lastPaid = new Date(lastPaidDateString);
     const nextBill = new Date(lastPaid);
     nextBill.setDate(lastPaid.getDate() + 30);
-    
-    const today = new Date();
-    today.setHours(0,0,0,0);
-    nextBill.setHours(0,0,0,0);
-
-    const diffTime = nextBill - today;
-    const daysLeft = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-
-    let statusColor = 'text-emerald-600 bg-emerald-50';
-    let riskLevel = 'safe'; 
-
-    if (daysLeft <= 3) {
-      statusColor = 'text-red-600 bg-red-50';
-      riskLevel = 'critical';
-    } else if (daysLeft <= 7) {
-      statusColor = 'text-amber-600 bg-amber-50';
-      riskLevel = 'warning';
-    }
-
+    const today = new Date(); today.setHours(0,0,0,0); nextBill.setHours(0,0,0,0);
+    const daysLeft = Math.ceil((nextBill - today) / (1000 * 60 * 60 * 24));
+    let statusColor = daysLeft <= 3 ? 'text-red-600 bg-red-50' : daysLeft <= 7 ? 'text-amber-600 bg-amber-50' : 'text-emerald-600 bg-emerald-50';
+    let riskLevel = daysLeft <= 3 ? 'critical' : daysLeft <= 7 ? 'warning' : 'safe';
     return { nextBillDate: nextBill.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }), daysLeft, statusColor, riskLevel };
   };
 
@@ -269,89 +241,60 @@ export default function AdminDashboard() {
       setExpenseModalOpen(false);
       setExpenseData({ amount: '', description: '', date: new Date().toISOString().split('T')[0] });
       fetchDashboardData();
-    } catch (err) {
-      toast.error('Failed to add expense');
-      setLoading(false);
-    }
+    } catch (err) { toast.error('Failed to add expense'); setLoading(false); }
   };
 
   const handleDeleteExpense = (expId) => {
     showConfirmModal("Delete Expense", "Remove this expense record permanently?", true, async () => {
       const { error } = await supabase.from('expenses').delete().eq('id', expId);
-      if (!error) {
-        toast.success('Expense deleted');
-        fetchDashboardData();
-      } else {
-        toast.error('Failed to delete expense');
-      }
+      if (!error) { toast.success('Expense deleted'); fetchDashboardData(); } else { toast.error('Failed to delete expense'); }
     });
   };
 
   // --- Analytics & Admin Controls ---
   const handleUpdateFee = () => {
-    showPromptModal(
-      "Update Standard Fee",
-      "Enter new default monthly fee (₹):",
-      currentFee,
-      async (newFee) => {
-        const parsedFee = parseInt(newFee);
-        if (!parsedFee || isNaN(parsedFee)) return;
-        
-        const hostelId = localStorage.getItem('admin_hostel_id');
-        const { error } = await supabase.from('hostels').update({ default_fee: parsedFee }).eq('id', hostelId);
-        
-        if (!error) {
-          setCurrentFee(parsedFee);
-          toast.success('Default fee updated!');
-          fetchDashboardData();
-        } else {
-          toast.error('Failed to update fee');
-        }
-      }
-    );
+    showPromptModal("Update Standard Fee", "Enter new default monthly fee (₹):", currentFee, async (newFee) => {
+      const parsedFee = parseInt(newFee);
+      if (!parsedFee || isNaN(parsedFee)) return;
+      const hostelId = localStorage.getItem('admin_hostel_id');
+      const { error } = await supabase.from('hostels').update({ default_fee: parsedFee }).eq('id', hostelId);
+      if (!error) { setCurrentFee(parsedFee); toast.success('Default fee updated!'); fetchDashboardData(); } else { toast.error('Failed to update fee'); }
+    });
   };
 
   const handleUpdateStudentFee = (e, studentId, currentVal) => {
     e.stopPropagation(); 
-    showPromptModal(
-      "Update Student Fee",
-      "Enter CUSTOM fee for this student (₹):",
-      currentVal || currentFee,
-      async (newFee) => {
-        const parsedFee = parseInt(newFee);
-        if (!parsedFee || isNaN(parsedFee)) return;
+    showPromptModal("Update Student Fee", "Enter CUSTOM fee for this student (₹):", currentVal || currentFee, async (newFee) => {
+      const parsedFee = parseInt(newFee);
+      if (!parsedFee || isNaN(parsedFee)) return;
+      const { error } = await supabase.from('students').update({ monthly_fee: parsedFee }).eq('id', studentId);
+      if (!error) { toast.success('Student fee updated'); fetchDashboardData(); } else { toast.error('Failed to update'); }
+    });
+  };
 
-        const { error } = await supabase.from('students').update({ monthly_fee: parsedFee }).eq('id', studentId);
-        if (!error) {
-          toast.success('Student fee updated');
-          fetchDashboardData();
-        } else {
-          toast.error('Failed to update');
-        }
-      }
-    );
+  const handleUpdateUPI = () => {
+    showPromptModal("Update UPI ID", "Enter your hostel's UPI ID (e.g., phone@upi):", upiId, async (newUpi) => {
+      if (!newUpi) return;
+      const hostelId = localStorage.getItem('admin_hostel_id');
+      const { error } = await supabase.from('hostels').update({ upi_id: newUpi }).eq('id', hostelId);
+      if (!error) { setUpiId(newUpi); toast.success('UPI ID updated!'); } else { toast.error('Failed to update UPI ID'); }
+    }, 'text');
   };
 
   const handleUploadQR = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
     const toastId = toast.loading("Uploading QR Code...");
-
     try {
       const fileName = `qr-${Date.now()}`;
       const { error: uploadError } = await supabase.storage.from('hostel-assets').upload(fileName, file);
       if (uploadError) throw uploadError;
-
       const { data: { publicUrl } } = supabase.storage.from('hostel-assets').getPublicUrl(fileName);
-      
       const hostelId = localStorage.getItem('admin_hostel_id');
       await supabase.from('hostels').update({ qr_code_url: publicUrl }).eq('id', hostelId);
-      
       setQrCodeUrl(publicUrl);
       toast.success("QR Code Updated!", { id: toastId });
-    } catch (error) {
-      toast.error("Upload failed", { id: toastId });
-    }
+    } catch (error) { toast.error("Upload failed", { id: toastId }); }
   };
 
   // --- Payment Approval Logic ---
@@ -360,78 +303,47 @@ export default function AdminDashboard() {
     try {
       const { error: payError } = await supabase.from('payments').update({ status: 'success' }).eq('id', payment.id);
       if (payError) throw payError;
-
       const today = new Date().toISOString().split('T')[0];
       const { error: stuError } = await supabase.from('students').update({ last_paid_date: today }).eq('id', payment.students.id);
       if (stuError) throw stuError;
-
       toast.success('Payment Approved & Date Updated!', { id: toastId });
       fetchDashboardData(); 
-    } catch (error) {
-      toast.error('Failed to approve payment', { id: toastId });
-    }
+    } catch (error) { toast.error('Failed to approve payment', { id: toastId }); }
   };
 
   const handleRejectPayment = (paymentId) => {
-    showConfirmModal(
-      "Reject Payment",
-      "Are you sure you want to reject this payment?",
-      true, 
-      async () => {
+    showConfirmModal("Reject Payment", "Are you sure you want to reject this payment?", true, async () => {
         const toastId = toast.loading('Rejecting payment...');
         try {
           const { error } = await supabase.from('payments').update({ status: 'rejected' }).eq('id', paymentId);
           if (error) throw error;
           toast.success('Payment Rejected', { id: toastId });
           fetchDashboardData();
-        } catch (error) {
-          toast.error('Failed to reject payment', { id: toastId });
-        }
+        } catch (error) { toast.error('Failed to reject payment', { id: toastId }); }
       }
     );
   };
 
-  const handleLogout = () => {
-    localStorage.removeItem('admin_hostel_id');
-    navigate('/login');
-  };
+  const handleLogout = () => { localStorage.removeItem('admin_hostel_id'); navigate('/login'); };
 
   const handleDelete = (id) => {
-    showConfirmModal(
-      "Permanently Delete Student?",
-      "This action cannot be undone. All data associated with this student will be lost.",
-      true, 
-      async () => {
+    showConfirmModal("Permanently Delete Student?", "This action cannot be undone. All data associated with this student will be lost.", true, async () => {
         const { error } = await supabase.from('students').delete().eq('id', id);
-        if (!error) {
-          setStudents(students.filter(s => s.id !== id));
-          toast.success('Student removed');
-          fetchDashboardData();
-        } else {
-          toast.error('Failed to delete student');
-        }
+        if (!error) { setStudents(students.filter(s => s.id !== id)); toast.success('Student removed'); fetchDashboardData(); } else { toast.error('Failed to delete student'); }
       }
     );
   };
 
-  const toggleExpand = (id) => {
-    setExpandedId(expandedId === id ? null : id);
-  };
+  const toggleExpand = (id) => { setExpandedId(expandedId === id ? null : id); };
 
   const handleDownloadImage = async (url, name) => {
     if (!url) return;
     try {
-      const response = await fetch(url);
-      const blob = await response.blob();
-      const link = document.createElement('a');
-      link.href = window.URL.createObjectURL(blob);
+      const response = await fetch(url); const blob = await response.blob();
+      const link = document.createElement('a'); link.href = window.URL.createObjectURL(blob);
       link.download = `${name.replace(/\s+/g, '_')}_photo.${blob.type.split('/')[1]}`;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-    } catch (error) {
-      toast.error("Download failed");
-    }
+      document.body.appendChild(link); link.click(); document.body.removeChild(link);
+    } catch (error) { toast.error("Download failed"); }
   };
 
   const createWhatsAppLink = (student, billInfo) => {
@@ -448,103 +360,46 @@ export default function AdminDashboard() {
       const indigo = [79, 70, 229]; 
       const textGray = [55, 65, 81];
       
-      doc.setFillColor(...indigo);
-      doc.rect(0, 0, 210, 40, 'F');
-      doc.setTextColor(255, 255, 255);
-      doc.setFontSize(24);
-      doc.setFont('helvetica', 'bold');
+      doc.setFillColor(...indigo); doc.rect(0, 0, 210, 40, 'F');
+      doc.setTextColor(255, 255, 255); doc.setFontSize(24); doc.setFont('helvetica', 'bold');
       doc.text(hostelName.toUpperCase() || 'ASHRAY HOSTEL', 105, 20, { align: 'center' });
-      doc.setFontSize(12);
-      doc.setFont('helvetica', 'normal');
-      doc.text('Official Student Profile', 105, 30, { align: 'center' });
-
+      doc.setFontSize(12); doc.setFont('helvetica', 'normal'); doc.text('Official Student Profile', 105, 30, { align: 'center' });
       if (student.photo_url) {
-        try {
-          const imgData = await getBase64ImageFromURL(student.photo_url);
-          doc.addImage(imgData, 'JPEG', 150, 50, 40, 40);
-          doc.setDrawColor(200, 200, 200);
-          doc.rect(150, 50, 40, 40);
-        } catch (imgError) {
-          console.warn("Could not load image for PDF:", imgError);
-        }
+        try { const imgData = await getBase64ImageFromURL(student.photo_url); doc.addImage(imgData, 'JPEG', 150, 50, 40, 40); doc.setDrawColor(200, 200, 200); doc.rect(150, 50, 40, 40); } catch (imgError) { console.warn("Could not load image for PDF:", imgError); }
       }
-
-      doc.setTextColor(...textGray);
-      doc.setFontSize(16);
-      doc.setFont('helvetica', 'bold');
-      doc.text('Personal Details', 20, 60);
-      doc.setDrawColor(229, 231, 235);
-      doc.line(20, 63, 140, 63); 
-
-      doc.setFontSize(12);
-      doc.setFont('helvetica', 'normal');
-      const startY = 75;
-      const gap = 12;
-      
-      doc.text(`Full Name: ${student.full_name}`, 20, startY);
-      doc.text(`Room Number: ${student.room_number}`, 20, startY + gap);
-      doc.text(`Mobile Number: ${student.mobile_number}`, 20, startY + gap * 2);
-      doc.text(`Email Address: ${student.email || 'Not Provided'}`, 20, startY + gap * 3);
-      doc.text(`Aadhar Number: ${student.adhar_number || 'Not Provided'}`, 20, startY + gap * 4);
-      
-      const addressLines = doc.splitTextToSize(`Permanent Address: ${student.address || 'Not Provided'}`, 170);
-      doc.text(addressLines, 20, startY + gap * 5);
-
+      doc.setTextColor(...textGray); doc.setFontSize(16); doc.setFont('helvetica', 'bold'); doc.text('Personal Details', 20, 60); doc.setDrawColor(229, 231, 235); doc.line(20, 63, 140, 63); 
+      doc.setFontSize(12); doc.setFont('helvetica', 'normal');
+      const startY = 75; const gap = 12;
+      doc.text(`Full Name: ${student.full_name}`, 20, startY); doc.text(`Room Number: ${student.room_number}`, 20, startY + gap); doc.text(`Mobile Number: ${student.mobile_number}`, 20, startY + gap * 2); doc.text(`Email Address: ${student.email || 'Not Provided'}`, 20, startY + gap * 3); doc.text(`Aadhar Number: ${student.adhar_number || 'Not Provided'}`, 20, startY + gap * 4);
+      const addressLines = doc.splitTextToSize(`Permanent Address: ${student.address || 'Not Provided'}`, 170); doc.text(addressLines, 20, startY + gap * 5);
       const billingY = Math.max(startY + gap * 5 + (addressLines.length * 7) + 15, 110); 
-      doc.setFontSize(16);
-      doc.setFont('helvetica', 'bold');
-      doc.text('Billing Status', 20, billingY);
-      doc.line(20, billingY + 3, 190, billingY + 3);
-
-      doc.setFontSize(12);
-      doc.setFont('helvetica', 'normal');
-      doc.text(`Last Payment Date: ${student.last_paid_date || 'N/A'}`, 20, billingY + 15);
-      doc.text(`Next Bill Due Date: ${bill.nextBillDate}`, 20, billingY + 15 + gap);
-      
-      doc.setFont('helvetica', 'bold');
-      doc.setTextColor(bill.daysLeft <= 3 ? 220 : 55, bill.daysLeft <= 3 ? 38 : 65, bill.daysLeft <= 3 ? 38 : 81);
-      doc.text(`Status: ${bill.daysLeft} Days Remaining`, 20, billingY + 15 + gap * 2);
-
-      doc.setTextColor(156, 163, 175);
-      doc.setFontSize(10);
-      doc.setFont('helvetica', 'normal');
-      doc.text('Generated automatically by the Ashray Administration System.', 105, 280, { align: 'center' });
-
-      const fileName = `${student.full_name.replace(/\s+/g, '_')}_Profile.pdf`;
-      doc.save(fileName);
-      window.open(doc.output('bloburl'), '_blank');
-      
+      doc.setFontSize(16); doc.setFont('helvetica', 'bold'); doc.text('Billing Status', 20, billingY); doc.line(20, billingY + 3, 190, billingY + 3);
+      doc.setFontSize(12); doc.setFont('helvetica', 'normal'); doc.text(`Last Payment Date: ${student.last_paid_date || 'N/A'}`, 20, billingY + 15); doc.text(`Next Bill Due Date: ${bill.nextBillDate}`, 20, billingY + 15 + gap);
+      doc.setFont('helvetica', 'bold'); doc.setTextColor(bill.daysLeft <= 3 ? 220 : 55, bill.daysLeft <= 3 ? 38 : 65, bill.daysLeft <= 3 ? 38 : 81); doc.text(`Status: ${bill.daysLeft} Days Remaining`, 20, billingY + 15 + gap * 2);
+      doc.setTextColor(156, 163, 175); doc.setFontSize(10); doc.setFont('helvetica', 'normal'); doc.text('Generated automatically by the Ashray Administration System.', 105, 280, { align: 'center' });
+      const fileName = `${student.full_name.replace(/\s+/g, '_')}_Profile.pdf`; doc.save(fileName); window.open(doc.output('bloburl'), '_blank');
       toast.success('PDF Downloaded!', { id: toastId });
-    } catch (error) {
-      toast.error('Failed to generate PDF', { id: toastId });
-    }
+    } catch (error) { toast.error('Failed to generate PDF', { id: toastId }); }
   };
 
-  // --- NEW: Generate Financial Report ---
   const handleDownloadFinancialReport = () => {
     const doc = new jsPDF();
     doc.setFillColor(79, 70, 229); doc.rect(0, 0, 210, 30, 'F');
     doc.setTextColor(255, 255, 255); doc.setFontSize(18); doc.setFont('helvetica', 'bold');
     doc.text(`${hostelName.toUpperCase()} - FINANCIAL REPORT`, 105, 18, { align: 'center' });
-    
     doc.setTextColor(50, 50, 50); doc.setFontSize(12); doc.setFont('helvetica', 'normal');
     doc.text(`Report Generated: ${new Date().toLocaleDateString()}`, 20, 40);
-    
-    doc.setFontSize(14); doc.setFont('helvetica', 'bold'); doc.text('Monthly Summary', 20, 55);
-    doc.line(20, 58, 190, 58);
-    
+    doc.setFontSize(14); doc.setFont('helvetica', 'bold'); doc.text('Monthly Summary', 20, 55); doc.line(20, 58, 190, 58);
     doc.setFontSize(12); doc.setFont('helvetica', 'normal');
     doc.text(`Total Expected Revenue: Rs. ${detailedStats.expectedRev.toLocaleString()}`, 20, 70);
     doc.text(`Actual Collected Income: Rs. ${detailedStats.currentIncome.toLocaleString()}`, 20, 80);
     doc.text(`Pending Dues: Rs. ${detailedStats.pendingDues.toLocaleString()}`, 20, 90);
     doc.text(`Total Expenses: Rs. ${detailedStats.currentExpense.toLocaleString()}`, 20, 100);
-    
     doc.setFont('helvetica', 'bold');
     const netProfit = detailedStats.currentIncome - detailedStats.currentExpense;
     doc.setTextColor(netProfit >= 0 ? 34 : 220, netProfit >= 0 ? 197 : 38, netProfit >= 0 ? 94 : 38);
     doc.text(`Net Profit: Rs. ${netProfit.toLocaleString()}`, 20, 115);
     doc.text(`Profit Margin: ${detailedStats.profitMargin}%`, 20, 125);
-    
     doc.save(`${hostelName.replace(/\s+/g, '_')}_Financial_Report.pdf`);
     toast.success('Report Downloaded!');
   };
@@ -655,13 +510,11 @@ export default function AdminDashboard() {
               </div>
             </div>
 
-            {/* Go to Detailed Analytics Button */}
             <button onClick={() => setActiveTab('detailed-analytics')} className="w-full bg-white border border-indigo-100 hover:bg-indigo-50 text-indigo-700 rounded-2xl p-4 shadow-sm transition flex items-center justify-center gap-2 font-bold group">
               <BarChart3 className="text-indigo-500 group-hover:scale-110 transition-transform" /> 
               View Detailed Financial Analytics & Expenses
             </button>
 
-            {/* QR Code Manager */}
             <div className="bg-white rounded-2xl p-6 shadow-sm border border-gray-100 flex flex-col sm:flex-row items-center gap-6">
               <div className="shrink-0 p-3 bg-gray-50 rounded-xl border border-gray-200">
                  {qrCodeUrl ? (
@@ -673,19 +526,33 @@ export default function AdminDashboard() {
                    </div>
                  )}
               </div>
-              <div className="flex-1 text-center sm:text-left">
-                <h3 className="text-lg font-bold text-gray-900">Payment QR Code</h3>
-                <p className="text-sm text-gray-500 mb-4">Upload your UPI QR code (GPay/PhonePe/Paytm). This will be shown to students as a fallback if the direct payment link fails.</p>
-                <label className="inline-flex items-center gap-2 bg-indigo-600 text-white px-5 py-2.5 rounded-xl font-bold text-sm cursor-pointer hover:bg-indigo-700 transition shadow-md">
-                  <Upload size={16} /> Upload New QR
-                  <input type="file" accept="image/*" className="hidden" onChange={handleUploadQR} />
-                </label>
+              <div className="flex-1 text-center sm:text-left w-full">
+                <h3 className="text-lg font-bold text-gray-900">Payment Configuration</h3>
+                <p className="text-sm text-gray-500 mb-4">Upload your UPI QR code or manually set your UPI ID. This helps students pay seamlessly directly through the app.</p>
+                
+                <div className="flex flex-col sm:flex-row gap-3">
+                  <label className="flex-1 inline-flex items-center justify-center gap-2 bg-indigo-600 text-white px-5 py-3 rounded-xl font-bold text-sm cursor-pointer hover:bg-indigo-700 transition shadow-md">
+                    <Upload size={16} /> Upload QR Image
+                    <input type="file" accept="image/*" className="hidden" onChange={handleUploadQR} />
+                  </label>
+                  
+                  <button onClick={handleUpdateUPI} className="flex-1 inline-flex items-center justify-center gap-2 bg-white text-gray-700 border border-gray-200 px-5 py-3 rounded-xl font-bold text-sm hover:bg-gray-50 transition shadow-sm">
+                    <Edit2 size={16} /> Edit UPI ID
+                  </button>
+                </div>
+                
+                <div className="mt-4 pt-4 border-t border-gray-100 flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-bold text-gray-900">Current UPI ID Link</p>
+                    <p className="text-xs text-gray-500 mt-0.5 font-mono bg-gray-50 px-2 py-1 rounded border inline-block">{upiId || 'Not configured'}</p>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
         ) : activeTab === 'detailed-analytics' ? (
           /* ========================================= */
-          /* NEW: DETAILED ANALYTICS & EXPENSES TAB    */
+          /* DETAILED ANALYTICS & EXPENSES TAB         */
           /* ========================================= */
           <div className="space-y-6 animate-in slide-in-from-right-8 fade-in duration-300">
             <div className="flex items-center justify-between mb-2">
@@ -698,7 +565,6 @@ export default function AdminDashboard() {
               </button>
             </div>
 
-            {/* Visual Cash Flow Bar */}
             <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100">
               <div className="flex justify-between items-end mb-3">
                 <div>
@@ -726,7 +592,6 @@ export default function AdminDashboard() {
               </div>
             </div>
 
-            {/* Detailed Stats Row */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
                <div className="bg-white p-4 rounded-2xl border border-gray-100 shadow-sm border-b-4 border-b-emerald-500">
                   <p className="text-xs text-gray-500 font-medium mb-1">Net Income</p>
@@ -747,7 +612,6 @@ export default function AdminDashboard() {
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {/* Unpaid / Defaulters List */}
               <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
                 <h3 className="font-bold text-gray-900 mb-4 flex items-center gap-2"><AlertTriangle size={18} className="text-amber-500"/> Action Required: Unpaid</h3>
                 <div className="space-y-3 max-h-[300px] overflow-y-auto pr-2">
@@ -771,7 +635,6 @@ export default function AdminDashboard() {
                 </div>
               </div>
 
-              {/* Expense List */}
               <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100">
                 <div className="flex justify-between items-center mb-4">
                   <h3 className="font-bold text-gray-900 flex items-center gap-2"><Receipt size={18} className="text-red-500"/> Recent Expenses</h3>
@@ -805,7 +668,6 @@ export default function AdminDashboard() {
                 </div>
               </div>
               
-              {/* Income List (Full width below) */}
               <div className="bg-white rounded-2xl p-5 shadow-sm border border-gray-100 md:col-span-2">
                 <h3 className="font-bold text-gray-900 mb-4 flex items-center gap-2"><Wallet size={18} className="text-emerald-500"/> Recent Payments (Income Sandbox)</h3>
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 max-h-[300px] overflow-y-auto pr-2">
@@ -838,7 +700,6 @@ export default function AdminDashboard() {
           /* STUDENTS TAB WITH ADVANCED FILTERS        */
           /* ========================================= */
           <div className="space-y-4 animate-in fade-in">
-            {/* Advanced Filters Area */}
             <div className="bg-white p-3 rounded-2xl shadow-sm border border-gray-100 flex flex-col sm:flex-row gap-3">
               <div className="relative flex-1">
                 <Search className="absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
@@ -873,7 +734,6 @@ export default function AdminDashboard() {
               </div>
             </div>
 
-            {/* Render Students */}
             {filteredStudents.map((student) => {
               const bill = getBillingDetails(student.last_paid_date);
               const isExpanded = expandedId === student.id;
@@ -968,7 +828,6 @@ export default function AdminDashboard() {
                 <div key={payment.id} className="bg-white p-5 rounded-2xl shadow-sm border border-amber-200/60 border-l-4 border-l-amber-400">
                   <div className="flex flex-col sm:flex-row justify-between gap-4">
                     
-                    {/* Payment Info */}
                     <div className="flex items-start gap-4">
                       <div className="w-12 h-12 bg-amber-50 rounded-full flex items-center justify-center text-amber-600 shrink-0">
                         <IndianRupee size={24} />
@@ -983,7 +842,6 @@ export default function AdminDashboard() {
                       </div>
                     </div>
 
-                    {/* Actions */}
                     <div className="flex flex-col sm:items-end justify-center gap-2 border-t sm:border-t-0 sm:border-l border-gray-100 pt-4 sm:pt-0 sm:pl-4">
                       <a 
                         href={payment.proof_url} 
@@ -1026,7 +884,7 @@ export default function AdminDashboard() {
             
             {modalConfig.type === 'prompt' && (
               <input 
-                type="number" 
+                type={modalConfig.inputType || 'number'} 
                 value={promptValue}
                 onChange={(e) => setPromptValue(e.target.value)}
                 className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 mb-6 font-bold text-lg text-gray-900 focus:ring-2 focus:ring-indigo-500 outline-none"

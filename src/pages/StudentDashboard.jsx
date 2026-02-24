@@ -12,7 +12,8 @@ export default function StudentDashboard() {
   // Payment States
   const [showPayModal, setShowPayModal] = useState(false);
   const [payAmount, setPayAmount] = useState(3000);
-  const [hostelQr, setHostelQr] = useState(null); // Store QR URL
+  const [hostelQr, setHostelQr] = useState(null); 
+  const [hostelUpi, setHostelUpi] = useState(''); // UPI ID State
   const [proofFile, setProofFile] = useState(null);
   const [uploading, setUploading] = useState(false);
 
@@ -29,19 +30,27 @@ export default function StudentDashboard() {
     if(data) setPayments(data);
   };
 
+  // Fixed: Merged the two duplicate functions into one
   const fetchHostelDetails = async (hostelId, studentCustomFee) => {
     if (!hostelId) return;
-    const { data } = await supabase.from('hostels').select('default_fee, qr_code_url').eq('id', hostelId).single();
+    const { data } = await supabase
+      .from('hostels')
+      .select('default_fee, qr_code_url, upi_id')
+      .eq('id', hostelId)
+      .single();
     
     if (data) {
       // Priority: Student Custom Fee > Hostel Default Fee > 3000 fallback
       setPayAmount(studentCustomFee || data.default_fee || 3000);
       setHostelQr(data.qr_code_url);
+      setHostelUpi(data.upi_id || '');
     }
   };
 
-  const upiId = "YOUR_UPI_ID_HERE"; 
-  const upiLink = `upi://pay?pa=${upiId}&pn=AshrayHostel&am=${payAmount}&cu=INR`;
+  // Generate the UPI link dynamically based on the state
+  const upiLink = hostelUpi 
+    ? `upi://pay?pa=${hostelUpi}&pn=AshrayHostel&am=${payAmount}&cu=INR` 
+    : '#';
 
   const handleSubmitProof = async (e) => {
     e.preventDefault();
@@ -153,7 +162,6 @@ export default function StudentDashboard() {
                ₹{payAmount}
             </div>
 
-            {/* QR Code Section (Only if Admin Uploaded one) */}
             {hostelQr ? (
               <div className="mb-6 flex flex-col items-center">
                  <p className="text-xs text-gray-500 mb-2 font-medium">Scan to Pay (GPay / PhonePe)</p>
