@@ -1,8 +1,8 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { supabase } from '../../lib/supabaseClient';
 import imageCompression from 'browser-image-compression';
 import toast from 'react-hot-toast';
-import { Upload, User, Mail, Home, Phone, Loader2, CheckCircle, FileText, X, ChevronRight, Camera, MapPin } from 'lucide-react';
+import { Upload, User, Mail, Home, Phone, Loader2, CheckCircle, FileText, X, ChevronRight, Camera, MapPin, Calendar, Building } from 'lucide-react';
 
 const HOSTEL_RULES = [
   "Full responsibility for one's own belongings lies with them.",
@@ -19,10 +19,33 @@ const HOSTEL_RULES = [
 export default function StudentRegister() {
   const [loading, setLoading] = useState(false);
   const [showRulesModal, setShowRulesModal] = useState(false);
-  // Added address to state
-  const [formData, setFormData] = useState({ fullName: '', email: '', roomNumber: '', mobile: '', adharNumber: '', address: '' });
+  
+  // Updated state with address, dob, and hostel_id
+  const [formData, setFormData] = useState({ 
+    fullName: '', 
+    email: '', 
+    roomNumber: '', 
+    mobile: '', 
+    adharNumber: '', 
+    address: '',
+    dob: '',
+    hostel_id: ''
+  });
+  
   const [photo, setPhoto] = useState(null);
   const [preview, setPreview] = useState(null);
+  const [hostels, setHostels] = useState([]);
+
+  // Fetch registered hostels when component loads
+  useEffect(() => {
+    const fetchHostels = async () => {
+      const { data, error } = await supabase.from('hostels').select('id, name');
+      if (data && !error) {
+        setHostels(data);
+      }
+    };
+    fetchHostels();
+  }, []);
 
   const handleNumberInput = (e, field, maxLength) => {
     const value = e.target.value.replace(/\D/g, '').slice(0, maxLength);
@@ -54,6 +77,10 @@ export default function StudentRegister() {
       toast.error('Please enter a valid 10-digit mobile number');
       return;
     }
+    if (!formData.hostel_id) {
+      toast.error('Please select a hostel');
+      return;
+    }
     setShowRulesModal(true);
   };
 
@@ -82,7 +109,9 @@ export default function StudentRegister() {
           room_number: formData.roomNumber,
           mobile_number: formData.mobile,
           adhar_number: formData.adharNumber,
-          address: formData.address, // Added address payload
+          address: formData.address,
+          dob: formData.dob,             // Added DOB
+          hostel_id: formData.hostel_id, // Added Hostel ID link
           photo_url: publicUrl,
           last_paid_date: new Date().toISOString().split('T')[0]
         }]);
@@ -90,7 +119,12 @@ export default function StudentRegister() {
       if (dbError) throw dbError;
 
       toast.success('Registration Complete!', { id: toastId });
-      setFormData({ fullName: '', email: '', roomNumber: '', mobile: '', adharNumber: '', address: '' });
+      
+      // Reset form
+      setFormData({ 
+        fullName: '', email: '', roomNumber: '', mobile: '', 
+        adharNumber: '', address: '', dob: '', hostel_id: '' 
+      });
       setPhoto(null);
       setPreview(null);
 
@@ -102,7 +136,7 @@ export default function StudentRegister() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-indigo-50/50 flex flex-col items-center justify-center p-4 sm:p-6">
+    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-indigo-50/50 flex flex-col items-center justify-center p-4 sm:p-6 pb-20">
       <div className="w-full max-w-md bg-white rounded-3xl shadow-xl shadow-indigo-100 overflow-hidden border border-white/50 backdrop-blur-sm relative">
         <div className="h-2 w-full bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500"></div>
 
@@ -135,6 +169,25 @@ export default function StudentRegister() {
 
             <div className="space-y-4">
               
+              {/* Hostel Selection */}
+              <div className="relative group">
+                <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                  <Building className="h-5 w-5 text-gray-400 group-focus-within:text-indigo-500 transition-colors" />
+                </div>
+                <select 
+                  required 
+                  className="w-full pl-11 pr-4 py-3.5 bg-gray-50 border-none rounded-2xl focus:ring-2 focus:ring-indigo-100 text-gray-800 font-medium transition-all focus:bg-white appearance-none"
+                  value={formData.hostel_id}
+                  onChange={(e) => setFormData({...formData, hostel_id: e.target.value})}
+                >
+                  <option value="" disabled>Select Your Hostel</option>
+                  {hostels.map(h => (
+                    <option key={h.id} value={h.id}>{h.name}</option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Name */}
               <div className="relative group">
                 <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
                   <User className="h-5 w-5 text-gray-400 group-focus-within:text-indigo-500 transition-colors" />
@@ -149,6 +202,7 @@ export default function StudentRegister() {
                 />
               </div>
 
+              {/* Mobile */}
               <div className="relative group">
                 <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
                   <Phone className="h-5 w-5 text-gray-400 group-focus-within:text-indigo-500 transition-colors" />
@@ -164,6 +218,22 @@ export default function StudentRegister() {
                 />
               </div>
 
+              {/* DOB */}
+              <div className="relative group">
+                <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                  <Calendar className="h-5 w-5 text-gray-400 group-focus-within:text-indigo-500 transition-colors" />
+                </div>
+                <input
+                  type="date"
+                  required
+                  className="w-full pl-11 pr-4 py-3.5 bg-gray-50 border-none rounded-2xl focus:ring-2 focus:ring-indigo-100 text-gray-800 font-medium transition-all focus:bg-white"
+                  value={formData.dob}
+                  onChange={(e) => setFormData({ ...formData, dob: e.target.value })}
+                />
+                <p className="text-xs text-indigo-500/80 mt-1 ml-2 font-medium">This will be used as your login password.</p>
+              </div>
+
+              {/* Email */}
               <div className="relative group">
                 <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
                   <Mail className="h-5 w-5 text-gray-400 group-focus-within:text-indigo-500 transition-colors" />
@@ -178,7 +248,7 @@ export default function StudentRegister() {
                 />
               </div>
 
-              {/* Added Address Field */}
+              {/* Address */}
               <div className="relative group">
                 <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
                   <MapPin className="h-5 w-5 text-gray-400 group-focus-within:text-indigo-500 transition-colors" />
