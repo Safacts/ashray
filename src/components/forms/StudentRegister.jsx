@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { supabase } from '../../lib/supabaseClient';
 import imageCompression from 'browser-image-compression';
 import toast from 'react-hot-toast';
-import { Upload, User, Mail, Home, Phone, Loader2, CheckCircle, FileText, X, ChevronRight, Camera } from 'lucide-react';
+import { Upload, User, Mail, Home, Phone, Loader2, CheckCircle, FileText, X, ChevronRight, Camera, MapPin } from 'lucide-react';
 
 const HOSTEL_RULES = [
   "Full responsibility for one's own belongings lies with them.",
@@ -12,17 +12,18 @@ const HOSTEL_RULES = [
   "Hostel closed during Dussehra and Sankranti holidays.",
   "Outsiders are not allowed in the hostel.",
   "Management is not responsible for outside disturbances.",
-  "Violation of rules will result in immediate expulsion."
+  "Violation of rules will result in immediate expulsion.",
+  "Using heavy electronic appliances requires permission and an extra payment of ₹500, otherwise a fine will be imposed."
 ];
 
 export default function StudentRegister() {
   const [loading, setLoading] = useState(false);
   const [showRulesModal, setShowRulesModal] = useState(false);
-  const [formData, setFormData] = useState({ fullName: '', email: '', roomNumber: '', mobile: '', adharNumber: '' });
+  // Added address to state
+  const [formData, setFormData] = useState({ fullName: '', email: '', roomNumber: '', mobile: '', adharNumber: '', address: '' });
   const [photo, setPhoto] = useState(null);
   const [preview, setPreview] = useState(null);
 
-  // --- Smart Input Handlers ---
   const handleNumberInput = (e, field, maxLength) => {
     const value = e.target.value.replace(/\D/g, '').slice(0, maxLength);
     setFormData({ ...formData, [field]: value });
@@ -81,6 +82,7 @@ export default function StudentRegister() {
           room_number: formData.roomNumber,
           mobile_number: formData.mobile,
           adhar_number: formData.adharNumber,
+          address: formData.address, // Added address payload
           photo_url: publicUrl,
           last_paid_date: new Date().toISOString().split('T')[0]
         }]);
@@ -88,7 +90,7 @@ export default function StudentRegister() {
       if (dbError) throw dbError;
 
       toast.success('Registration Complete!', { id: toastId });
-      setFormData({ fullName: '', email: '', roomNumber: '', mobile: '', adharNumber: '' });
+      setFormData({ fullName: '', email: '', roomNumber: '', mobile: '', adharNumber: '', address: '' });
       setPhoto(null);
       setPreview(null);
 
@@ -101,11 +103,7 @@ export default function StudentRegister() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-indigo-50/50 flex flex-col items-center justify-center p-4 sm:p-6">
-      
-      {/* Main Card */}
       <div className="w-full max-w-md bg-white rounded-3xl shadow-xl shadow-indigo-100 overflow-hidden border border-white/50 backdrop-blur-sm relative">
-        
-        {/* Decorative Top Gradient */}
         <div className="h-2 w-full bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500"></div>
 
         <div className="p-6 sm:p-8">
@@ -116,7 +114,6 @@ export default function StudentRegister() {
 
           <form onSubmit={handleInitialSubmit} className="space-y-5">
             
-            {/* Photo Upload - Mobile Optimized */}
             <div className="flex flex-col items-center mb-6">
               <div className="relative group">
                 <label className="cursor-pointer w-28 h-28 rounded-full shadow-[0_8px_30px_rgb(0,0,0,0.04)] border-4 border-white flex items-center justify-center bg-gray-50 hover:bg-gray-100 transition-all duration-300 overflow-hidden ring-1 ring-gray-100">
@@ -130,17 +127,14 @@ export default function StudentRegister() {
                   )}
                   <input type="file" accept="image/*" className="hidden" onChange={handleImageChange} required />
                 </label>
-                {/* Upload Indicator */}
                 <div className="absolute bottom-0 right-0 bg-indigo-600 text-white p-2 rounded-full shadow-lg border-2 border-white transform translate-x-1 translate-y-1">
                   <Upload className="w-4 h-4" />
                 </div>
               </div>
             </div>
 
-            {/* Floating Label Inputs */}
             <div className="space-y-4">
               
-              {/* Name */}
               <div className="relative group">
                 <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
                   <User className="h-5 w-5 text-gray-400 group-focus-within:text-indigo-500 transition-colors" />
@@ -155,7 +149,6 @@ export default function StudentRegister() {
                 />
               </div>
 
-              {/* Mobile Number (Numeric Only) */}
               <div className="relative group">
                 <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
                   <Phone className="h-5 w-5 text-gray-400 group-focus-within:text-indigo-500 transition-colors" />
@@ -171,7 +164,6 @@ export default function StudentRegister() {
                 />
               </div>
 
-              {/* Email */}
               <div className="relative group">
                 <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
                   <Mail className="h-5 w-5 text-gray-400 group-focus-within:text-indigo-500 transition-colors" />
@@ -186,9 +178,22 @@ export default function StudentRegister() {
                 />
               </div>
 
-              {/* Grid for Room & Aadhar */}
+              {/* Added Address Field */}
+              <div className="relative group">
+                <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                  <MapPin className="h-5 w-5 text-gray-400 group-focus-within:text-indigo-500 transition-colors" />
+                </div>
+                <input
+                  type="text"
+                  placeholder="Permanent Address"
+                  required
+                  className="w-full pl-11 pr-4 py-3.5 bg-gray-50 border-none rounded-2xl focus:ring-2 focus:ring-indigo-100 text-gray-800 placeholder-gray-400 font-medium transition-all focus:bg-white"
+                  value={formData.address}
+                  onChange={(e) => setFormData({ ...formData, address: e.target.value })}
+                />
+              </div>
+
               <div className="grid grid-cols-5 gap-3">
-                {/* Room No (Smaller width) */}
                 <div className="col-span-2 relative group">
                   <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                     <Home className="h-5 w-5 text-gray-400 group-focus-within:text-indigo-500 transition-colors" />
@@ -203,7 +208,6 @@ export default function StudentRegister() {
                   />
                 </div>
 
-                {/* Aadhar (Larger width) */}
                 <div className="col-span-3 relative group">
                   <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                     <FileText className="h-5 w-5 text-gray-400 group-focus-within:text-indigo-500 transition-colors" />
@@ -222,7 +226,6 @@ export default function StudentRegister() {
 
             </div>
 
-            {/* Action Button */}
             <button
               type="submit"
               className="w-full mt-6 bg-gray-900 text-white font-bold py-4 rounded-2xl shadow-lg hover:shadow-xl hover:bg-black transition-all duration-300 flex items-center justify-center gap-2 group active:scale-[0.98]"
@@ -234,14 +237,12 @@ export default function StudentRegister() {
         </div>
       </div>
 
-      {/* Modern Bottom Sheet / Modal */}
       {showRulesModal && (
         <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center">
           <div className="absolute inset-0 bg-gray-900/60 backdrop-blur-sm transition-opacity" onClick={() => setShowRulesModal(false)}></div>
           
           <div className="relative w-full max-w-lg bg-white rounded-t-3xl sm:rounded-3xl shadow-2xl p-6 sm:p-8 animate-in slide-in-from-bottom duration-300 max-h-[85vh] flex flex-col">
             
-            {/* Drag Handle (Mobile) */}
             <div className="w-12 h-1.5 bg-gray-200 rounded-full mx-auto mb-6 sm:hidden"></div>
 
             <div className="flex justify-between items-start mb-4">

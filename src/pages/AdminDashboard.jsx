@@ -1,15 +1,28 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabaseClient';
-import { Trash2, Search, Loader2, User, Phone, FileText, Download, MessageCircle, ChevronDown, ChevronUp, Calendar, Filter } from 'lucide-react';
+import { Trash2, Search, Loader2, User, Phone, FileText, Download, MessageCircle, ChevronDown, ChevronUp, Calendar, Lock, Key } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 export default function AdminDashboard() {
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [passwordInput, setPasswordInput] = useState('');
   const [students, setStudents] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
-  const [expandedId, setExpandedId] = useState(null); // Track which card is open on mobile
+  const [expandedId, setExpandedId] = useState(null);
 
-  // Fetch Data
+  const handleLogin = (e) => {
+    e.preventDefault();
+    // Verify password against Vite environment variable
+    if (passwordInput === import.meta.env.VITE_ADMIN_PASSWORD) {
+      setIsAuthenticated(true);
+      toast.success('Access Granted');
+      fetchStudents(); // Load data only after auth
+    } else {
+      toast.error('Incorrect Password');
+    }
+  };
+
   const fetchStudents = async () => {
     try {
       const { data, error } = await supabase
@@ -26,11 +39,6 @@ export default function AdminDashboard() {
     }
   };
 
-  useEffect(() => {
-    fetchStudents();
-  }, []);
-
-  // Actions
   const handleDelete = async (id) => {
     if (!confirm('Permanently delete this student?')) return;
     const { error } = await supabase.from('students').delete().eq('id', id);
@@ -44,7 +52,6 @@ export default function AdminDashboard() {
     setExpandedId(expandedId === id ? null : id);
   };
 
-  // Helper Logic
   const getBillingDetails = (lastPaidDateString) => {
     if (!lastPaidDateString) return { nextBillDate: 'N/A', daysLeft: 0, statusColor: 'text-gray-400', riskLevel: 'low' };
 
@@ -60,7 +67,7 @@ export default function AdminDashboard() {
     const daysLeft = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
 
     let statusColor = 'text-emerald-600 bg-emerald-50';
-    let riskLevel = 'safe'; // for border colors
+    let riskLevel = 'safe'; 
 
     if (daysLeft <= 3) {
       statusColor = 'text-red-600 bg-red-50';
@@ -106,10 +113,45 @@ export default function AdminDashboard() {
     s.room_number.includes(searchTerm)
   );
 
+  // --- Auth Guard UI ---
+  if (!isAuthenticated) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+        <div className="bg-white p-8 rounded-3xl shadow-xl max-w-md w-full border border-gray-100">
+          <div className="text-center mb-6">
+            <div className="bg-indigo-50 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
+              <Lock className="w-8 h-8 text-indigo-600" />
+            </div>
+            <h1 className="text-2xl font-bold text-gray-900">Admin Login</h1>
+            <p className="text-sm text-gray-500 mt-1">Ashray Dashboard Access</p>
+          </div>
+          <form onSubmit={handleLogin} className="space-y-4">
+            <div className="relative group">
+              <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                <Key className="h-5 w-5 text-gray-400 group-focus-within:text-indigo-500 transition-colors" />
+              </div>
+              <input
+                type="password"
+                placeholder="Enter Admin Password"
+                required
+                className="w-full pl-11 pr-4 py-3.5 bg-gray-50 border-none rounded-2xl focus:ring-2 focus:ring-indigo-100 text-gray-800 font-medium transition-all focus:bg-white"
+                value={passwordInput}
+                onChange={(e) => setPasswordInput(e.target.value)}
+              />
+            </div>
+            <button type="submit" className="w-full bg-gray-900 text-white font-bold py-4 rounded-xl shadow-lg hover:bg-black transition-all">
+              Unlock Dashboard
+            </button>
+          </form>
+        </div>
+      </div>
+    );
+  }
+
+  // --- Main Dashboard UI ---
   return (
     <div className="min-h-screen bg-gray-50/50 pb-20">
       
-      {/* 1. Header & Stats */}
       <div className="bg-white border-b border-gray-200 sticky top-0 z-30 px-4 py-4 shadow-sm">
         <div className="max-w-5xl mx-auto">
           <div className="flex flex-col gap-4">
@@ -123,7 +165,6 @@ export default function AdminDashboard() {
               </div>
             </div>
 
-            {/* Search Bar */}
             <div className="relative">
               <Search className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
               <input 
@@ -137,7 +178,6 @@ export default function AdminDashboard() {
         </div>
       </div>
 
-      {/* 2. Content Area */}
       <div className="max-w-5xl mx-auto p-4 space-y-3">
         {loading ? (
           <div className="flex justify-center p-10"><Loader2 className="animate-spin text-indigo-600" /></div>
@@ -146,7 +186,6 @@ export default function AdminDashboard() {
             const bill = getBillingDetails(student.last_paid_date);
             const isExpanded = expandedId === student.id;
             
-            // Dynamic Border Color based on Payment Status
             const borderColor = bill.riskLevel === 'critical' ? 'border-l-red-500' 
               : bill.riskLevel === 'warning' ? 'border-l-amber-500' 
               : 'border-l-indigo-500';
@@ -156,12 +195,10 @@ export default function AdminDashboard() {
                 key={student.id} 
                 className={`bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden transition-all duration-300 ${borderColor} border-l-4`}
               >
-                {/* Main Row (Always Visible) */}
                 <div 
                   className="p-4 flex items-center gap-4 cursor-pointer"
                   onClick={() => toggleExpand(student.id)}
                 >
-                  {/* Photo */}
                   <div className="relative shrink-0">
                     <img 
                       src={student.photo_url || "https://via.placeholder.com/150"} 
@@ -173,7 +210,6 @@ export default function AdminDashboard() {
                     )}
                   </div>
 
-                  {/* Name & Room */}
                   <div className="flex-1 min-w-0">
                     <h3 className="text-gray-900 font-bold truncate">{student.full_name}</h3>
                     <div className="flex items-center gap-2 mt-0.5">
@@ -186,17 +222,14 @@ export default function AdminDashboard() {
                     </div>
                   </div>
 
-                  {/* Chevron Toggle */}
                   <button className="text-gray-400">
                     {isExpanded ? <ChevronUp size={20} /> : <ChevronDown size={20} />}
                   </button>
                 </div>
 
-                {/* Expanded Details (Stacked Logic) */}
                 <div className={`bg-gray-50/50 border-t border-gray-100 overflow-hidden transition-all duration-300 ${isExpanded ? 'max-h-[500px] opacity-100' : 'max-h-0 opacity-0'}`}>
                   <div className="p-4 space-y-4">
                     
-                    {/* Info Grid */}
                     <div className="grid grid-cols-2 gap-4 text-sm">
                       <div className="space-y-1">
                         <span className="text-xs text-gray-400 uppercase font-semibold">Next Bill</span>
@@ -219,9 +252,17 @@ export default function AdminDashboard() {
                             {student.adhar_number || 'Not Submitted'}
                          </div>
                       </div>
+                      {/* Optional: Add a display for the newly collected Address here if you want */}
+                      {student.address && (
+                        <div className="col-span-2 space-y-1">
+                           <span className="text-xs text-gray-400 uppercase font-semibold">Address</span>
+                           <div className="font-medium text-gray-700 bg-white px-2 py-1 rounded border border-gray-200">
+                              {student.address}
+                           </div>
+                        </div>
+                      )}
                     </div>
 
-                    {/* Action Buttons */}
                     <div className="flex gap-3 pt-2">
                       <a 
                         href={createWhatsAppLink(student, bill)}
