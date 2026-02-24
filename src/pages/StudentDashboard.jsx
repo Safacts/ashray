@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { supabase } from '../lib/supabaseClient';
-import { User, Calendar, CreditCard, Clock, LogOut, Upload, CheckCircle, AlertCircle, Loader2 } from 'lucide-react';
+import { User, Calendar, CreditCard, Clock, LogOut, Upload, CheckCircle, AlertCircle, Loader2, QrCode } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useNavigate } from 'react-router-dom';
 
@@ -9,9 +9,10 @@ export default function StudentDashboard() {
   const [payments, setPayments] = useState([]);
   const navigate = useNavigate();
   
-  // Payment Modal States
+  // Payment States
   const [showPayModal, setShowPayModal] = useState(false);
-  const [payAmount, setPayAmount] = useState(3000); // Default fallback
+  const [payAmount, setPayAmount] = useState(3000);
+  const [hostelQr, setHostelQr] = useState(null); // Store QR URL
   const [proofFile, setProofFile] = useState(null);
   const [uploading, setUploading] = useState(false);
 
@@ -20,7 +21,7 @@ export default function StudentDashboard() {
     if (!user) { navigate('/login'); return; }
     setStudent(user);
     fetchPayments(user.id);
-    fetchHostelFee(user.hostel_id);
+    fetchHostelDetails(user.hostel_id, user.monthly_fee);
   }, [navigate]);
 
   const fetchPayments = async (id) => {
@@ -28,15 +29,18 @@ export default function StudentDashboard() {
     if(data) setPayments(data);
   };
 
-  const fetchHostelFee = async (hostelId) => {
+  const fetchHostelDetails = async (hostelId, studentCustomFee) => {
     if (!hostelId) return;
-    const { data } = await supabase.from('hostels').select('default_fee').eq('id', hostelId).single();
-    if (data && data.default_fee) {
-      setPayAmount(data.default_fee);
+    const { data } = await supabase.from('hostels').select('default_fee, qr_code_url').eq('id', hostelId).single();
+    
+    if (data) {
+      // Priority: Student Custom Fee > Hostel Default Fee > 3000 fallback
+      setPayAmount(studentCustomFee || data.default_fee || 3000);
+      setHostelQr(data.qr_code_url);
     }
   };
 
-  const upiId = "YOUR_UPI_ID_HERE"; // <--- CHANGE THIS TO YOUR ACTUAL UPI ID
+  const upiId = "YOUR_UPI_ID_HERE"; 
   const upiLink = `upi://pay?pa=${upiId}&pn=AshrayHostel&am=${payAmount}&cu=INR`;
 
   const handleSubmitProof = async (e) => {
@@ -74,8 +78,7 @@ export default function StudentDashboard() {
       fetchPayments(student.id);
 
     } catch (error) {
-      console.error(error);
-      toast.error('Failed to submit proof. Try again.', { id: toastId });
+      toast.error('Failed to submit proof', { id: toastId });
     } finally {
       setUploading(false);
     }
@@ -142,29 +145,39 @@ export default function StudentDashboard() {
 
       {showPayModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-gray-900/60 backdrop-blur-sm">
-          <div className="bg-white w-full max-w-sm rounded-3xl p-6 shadow-2xl animate-in fade-in zoom-in-95">
-            <h2 className="text-xl font-bold text-gray-900 mb-4">Pay Hostel Fees</h2>
+          <div className="bg-white w-full max-w-sm rounded-3xl p-6 shadow-2xl animate-in fade-in zoom-in-95 max-h-[90vh] overflow-y-auto">
+            <h2 className="text-xl font-bold text-gray-900 mb-2">Pay Hostel Fees</h2>
             
-            <label className="block text-sm font-semibold text-gray-700 mb-1">Amount (₹)</label>
-            <input 
-              type="number" 
-              value={payAmount}
-              onChange={(e) => setPayAmount(e.target.value)}
-              className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 mb-2 font-bold text-lg focus:ring-2 focus:ring-indigo-500 outline-none"
-            />
+            <label className="block text-sm font-semibold text-gray-700 mb-1">Paying Amount</label>
+            <div className="w-full bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 mb-4 font-bold text-lg text-gray-900">
+               ₹{payAmount}
+            </div>
+
+            {/* QR Code Section (Only if Admin Uploaded one) */}
+            {hostelQr ? (
+              <div className="mb-6 flex flex-col items-center">
+                 <p className="text-xs text-gray-500 mb-2 font-medium">Scan to Pay (GPay / PhonePe)</p>
+                 <div className="p-2 border-2 border-indigo-100 rounded-xl bg-white shadow-sm">
+                    <img src={hostelQr} alt="Hostel QR" className="w-40 h-40 object-contain" />
+                 </div>
+              </div>
+            ) : (
+               <div className="mb-4 bg-amber-50 p-3 rounded-lg text-amber-700 text-xs text-center">
+                 Admin hasn't uploaded a QR code yet. Please use the button below or ask admin.
+               </div>
+            )}
 
             <a 
               href={upiLink}
-              className="w-full flex items-center justify-center gap-2 bg-indigo-50 text-indigo-700 border border-indigo-200 py-3 rounded-xl font-bold mb-2 hover:bg-indigo-100 transition"
+              className="w-full flex items-center justify-center gap-2 bg-indigo-50 text-indigo-700 border border-indigo-200 py-3 rounded-xl font-bold mb-4 hover:bg-indigo-100 transition"
             >
-              <CreditCard size={18} /> Open UPI App to Pay
+              <CreditCard size={18} /> Pay via UPI App
             </a>
-            <p className="text-[10px] text-center text-gray-400 mb-6 font-medium">Button works on mobile devices only. If on PC, scan QR or pay manually.</p>
 
             <hr className="mb-6 border-gray-100" />
 
             <form onSubmit={handleSubmitProof}>
-              <p className="text-sm font-semibold text-gray-700 mb-2">After paying, upload screenshot:</p>
+              <p className="text-sm font-semibold text-gray-700 mb-2">Upload Payment Screenshot:</p>
               <input 
                 type="file" 
                 accept="image/*" 
