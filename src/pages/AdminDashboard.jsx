@@ -1,7 +1,27 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '../lib/supabaseClient';
-import { Trash2, Search, Loader2, User, Phone, FileText, Download, MessageCircle, ChevronDown, ChevronUp, Calendar, Lock, Key } from 'lucide-react';
+import { Trash2, Search, Loader2, User, Phone, FileText, Download, MessageCircle, ChevronDown, ChevronUp, Calendar, Lock, Key, PhoneCall, FileDown, Image as ImageIcon } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { jsPDF } from 'jspdf';
+
+// Helper function to convert image URL to Base64 for jsPDF
+const getBase64ImageFromURL = (url) => {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.crossOrigin = 'Anonymous'; // Required to prevent CORS canvas tainting
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = img.width;
+      canvas.height = img.height;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0);
+      const dataURL = canvas.toDataURL('image/jpeg');
+      resolve(dataURL);
+    };
+    img.onerror = (error) => reject(error);
+    img.src = url;
+  });
+};
 
 export default function AdminDashboard() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -13,11 +33,10 @@ export default function AdminDashboard() {
 
   const handleLogin = (e) => {
     e.preventDefault();
-    // Verify password against Vite environment variable
     if (passwordInput === import.meta.env.VITE_ADMIN_PASSWORD) {
       setIsAuthenticated(true);
       toast.success('Access Granted');
-      fetchStudents(); // Load data only after auth
+      fetchStudents();
     } else {
       toast.error('Incorrect Password');
     }
@@ -108,12 +127,103 @@ export default function AdminDashboard() {
     return `https://wa.me/${number.length === 10 ? '91'+number : number}?text=${encodeURIComponent(message)}`;
   };
 
+  // --- Upgraded PDF Generation Logic with Photo ---
+  const handleDownloadPDF = async (student, bill) => {
+    const toastId = toast.loading('Generating Profile PDF...');
+    try {
+      const doc = new jsPDF();
+      const indigo = [79, 70, 229]; // Tailwind indigo-600
+      const textGray = [55, 65, 81];
+      
+      // Header Banner
+      doc.setFillColor(...indigo);
+      doc.rect(0, 0, 210, 40, 'F');
+      doc.setTextColor(255, 255, 255);
+      doc.setFontSize(24);
+      doc.setFont('helvetica', 'bold');
+      doc.text('ASHRAY HOSTEL', 105, 20, { align: 'center' });
+      doc.setFontSize(12);
+      doc.setFont('helvetica', 'normal');
+      doc.text('Official Student Profile', 105, 30, { align: 'center' });
+
+      // Add Student Photo (Right side)
+      if (student.photo_url) {
+        try {
+          const imgData = await getBase64ImageFromURL(student.photo_url);
+          // Draw image: imgData, format, x, y, width, height
+          doc.addImage(imgData, 'JPEG', 150, 50, 40, 40);
+          
+          // Draw a subtle border around the image
+          doc.setDrawColor(200, 200, 200);
+          doc.rect(150, 50, 40, 40);
+        } catch (imgError) {
+          console.warn("Could not load image for PDF:", imgError);
+        }
+      }
+
+      // Section 1: Personal Details (Left side)
+      doc.setTextColor(...textGray);
+      doc.setFontSize(16);
+      doc.setFont('helvetica', 'bold');
+      doc.text('Personal Details', 20, 60);
+      doc.setDrawColor(229, 231, 235);
+      // Make the line shorter to not intersect with the photo
+      doc.line(20, 63, 140, 63); 
+
+      doc.setFontSize(12);
+      doc.setFont('helvetica', 'normal');
+      const startY = 75;
+      const gap = 12;
+      
+      doc.text(`Full Name: ${student.full_name}`, 20, startY);
+      doc.text(`Room Number: ${student.room_number}`, 20, startY + gap);
+      doc.text(`Mobile Number: ${student.mobile_number}`, 20, startY + gap * 2);
+      doc.text(`Email Address: ${student.email || 'Not Provided'}`, 20, startY + gap * 3);
+      doc.text(`Aadhar Number: ${student.adhar_number || 'Not Provided'}`, 20, startY + gap * 4);
+      
+      // Address (Handling text wrap if it's long)
+      const addressLines = doc.splitTextToSize(`Permanent Address: ${student.address || 'Not Provided'}`, 170);
+      doc.text(addressLines, 20, startY + gap * 5);
+
+      // Section 2: Billing Information
+      const billingY = Math.max(startY + gap * 5 + (addressLines.length * 7) + 15, 110); // Ensure it drops below the photo
+      doc.setFontSize(16);
+      doc.setFont('helvetica', 'bold');
+      doc.text('Billing Status', 20, billingY);
+      doc.line(20, billingY + 3, 190, billingY + 3);
+
+      doc.setFontSize(12);
+      doc.setFont('helvetica', 'normal');
+      doc.text(`Last Payment Date: ${student.last_paid_date || 'N/A'}`, 20, billingY + 15);
+      doc.text(`Next Bill Due Date: ${bill.nextBillDate}`, 20, billingY + 15 + gap);
+      
+      doc.setFont('helvetica', 'bold');
+      doc.setTextColor(bill.daysLeft <= 3 ? 220 : 55, bill.daysLeft <= 3 ? 38 : 65, bill.daysLeft <= 3 ? 38 : 81);
+      doc.text(`Status: ${bill.daysLeft} Days Remaining`, 20, billingY + 15 + gap * 2);
+
+      // Footer
+      doc.setTextColor(156, 163, 175);
+      doc.setFontSize(10);
+      doc.setFont('helvetica', 'normal');
+      doc.text('Generated automatically by the Ashray Administration System.', 105, 280, { align: 'center' });
+
+      // Output
+      const fileName = `${student.full_name.replace(/\s+/g, '_')}_Profile.pdf`;
+      doc.save(fileName);
+      window.open(doc.output('bloburl'), '_blank');
+      
+      toast.success('PDF Downloaded!', { id: toastId });
+    } catch (error) {
+      console.error(error);
+      toast.error('Failed to generate PDF', { id: toastId });
+    }
+  };
+
   const filteredStudents = students.filter(s => 
     s.full_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
     s.room_number.includes(searchTerm)
   );
 
-  // --- Auth Guard UI ---
   if (!isAuthenticated) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
@@ -148,7 +258,6 @@ export default function AdminDashboard() {
     );
   }
 
-  // --- Main Dashboard UI ---
   return (
     <div className="min-h-screen bg-gray-50/50 pb-20">
       
@@ -227,7 +336,7 @@ export default function AdminDashboard() {
                   </button>
                 </div>
 
-                <div className={`bg-gray-50/50 border-t border-gray-100 overflow-hidden transition-all duration-300 ${isExpanded ? 'max-h-[500px] opacity-100' : 'max-h-0 opacity-0'}`}>
+                <div className={`bg-gray-50/50 border-t border-gray-100 overflow-hidden transition-all duration-300 ${isExpanded ? 'max-h-[800px] opacity-100' : 'max-h-0 opacity-0'}`}>
                   <div className="p-4 space-y-4">
                     
                     <div className="grid grid-cols-2 gap-4 text-sm">
@@ -252,7 +361,6 @@ export default function AdminDashboard() {
                             {student.adhar_number || 'Not Submitted'}
                          </div>
                       </div>
-                      {/* Optional: Add a display for the newly collected Address here if you want */}
                       {student.address && (
                         <div className="col-span-2 space-y-1">
                            <span className="text-xs text-gray-400 uppercase font-semibold">Address</span>
@@ -263,27 +371,41 @@ export default function AdminDashboard() {
                       )}
                     </div>
 
-                    <div className="flex gap-3 pt-2">
-                      <a 
-                        href={createWhatsAppLink(student, bill)}
-                        target="_blank"
-                        className="flex-1 bg-green-50 text-green-700 border border-green-200 py-2.5 rounded-xl font-semibold text-sm flex items-center justify-center gap-2 hover:bg-green-100 transition"
-                      >
-                        <MessageCircle size={16} /> WhatsApp
-                      </a>
-                      
-                      <button 
-                        onClick={() => handleDownloadImage(student.photo_url, student.full_name)}
-                        className="flex-1 bg-white text-gray-700 border border-gray-200 py-2.5 rounded-xl font-semibold text-sm flex items-center justify-center gap-2 hover:bg-gray-50 transition"
-                      >
-                        <Download size={16} /> Photo
-                      </button>
+                    <div className="pt-2 space-y-2">
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                        <a 
+                          href={`tel:${student.mobile_number}`}
+                          className="bg-blue-50 text-blue-700 border border-blue-100 py-2.5 rounded-xl font-semibold text-sm flex items-center justify-center gap-2 hover:bg-blue-100 transition"
+                        >
+                          <PhoneCall size={16} /> Call
+                        </a>
+                        <a 
+                          href={createWhatsAppLink(student, bill)}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="bg-green-50 text-green-700 border border-green-100 py-2.5 rounded-xl font-semibold text-sm flex items-center justify-center gap-2 hover:bg-green-100 transition"
+                        >
+                          <MessageCircle size={16} /> WhatsApp
+                        </a>
+                        <button 
+                          onClick={() => handleDownloadPDF(student, bill)}
+                          className="bg-indigo-50 text-indigo-700 border border-indigo-100 py-2.5 rounded-xl font-semibold text-sm flex items-center justify-center gap-2 hover:bg-indigo-100 transition cursor-pointer"
+                        >
+                          <FileDown size={16} /> PDF Profile
+                        </button>
+                        <button 
+                          onClick={() => handleDownloadImage(student.photo_url, student.full_name)}
+                          className="bg-white text-gray-700 border border-gray-200 py-2.5 rounded-xl font-semibold text-sm flex items-center justify-center gap-2 hover:bg-gray-50 transition"
+                        >
+                          <ImageIcon size={16} /> Get Photo
+                        </button>
+                      </div>
 
                       <button 
                         onClick={() => handleDelete(student.id)}
-                        className="w-12 flex items-center justify-center bg-red-50 text-red-500 border border-red-100 rounded-xl hover:bg-red-100 transition"
+                        className="w-full flex items-center justify-center gap-2 bg-red-50/50 text-red-500 border border-red-100 py-2.5 rounded-xl hover:bg-red-50 transition"
                       >
-                        <Trash2 size={18} />
+                        <Trash2 size={16} /> Remove Student
                       </button>
                     </div>
 
