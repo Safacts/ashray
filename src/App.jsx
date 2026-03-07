@@ -1,4 +1,4 @@
-﻿import { BrowserRouter as Router, Routes, Route, Link, Navigate } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Link, Navigate } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 import { Home, LogIn, UserPlus, Building2 } from 'lucide-react'; // Changed BuildingPlus to Building2
 
@@ -8,6 +8,7 @@ import StudentDashboard from './pages/StudentDashboard';
 import StudentRegister from './components/forms/StudentRegister';
 import HostelRegister from './components/forms/HostelRegister';
 import Footer from './components/ui/Footer';
+import { Analytics } from '@vercel/analytics/react';
 
 function App() {
   return (
@@ -58,6 +59,7 @@ function App() {
         </main>
 
         <Footer />
+        <Analytics />
         
       </div>
     </Router>
